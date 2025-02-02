@@ -33,22 +33,26 @@ def get_all_playlist_tracks(playlist_id):
 
     return tracks
 
-def get_recent_tracks(playlist_id):
-    tracks = get_all_playlist_tracks(playlist_id)
-
+def get_recent_tracks_from_playlists(playlist_ids):
+    recent_tracks = []
     one_month_ago = datetime.now() - timedelta(days=30)
     print(f"One month ago: {one_month_ago}")
 
-    recent_tracks = []
-    for item in tracks:
-        added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
-        if added_at > one_month_ago:
-            recent_tracks.append(item['track']['uri'])
+    for playlist_id in playlist_ids:
+        print(f"Fetching tracks from playlist: {sp.playlist(playlist_id)['name']}")
+        tracks = get_all_playlist_tracks(playlist_id)
 
+        for item in tracks:
+            added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
+            if added_at > one_month_ago:
+                recent_tracks.append(item['track']['uri'])
+
+    # Remove duplicate tracks
+    recent_tracks = list(set(recent_tracks))
     return recent_tracks
 
-def update_recent_tracks_playlist(source_playlist_id, target_playlist_name):
-    recent_tracks = get_recent_tracks(source_playlist_id)
+def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
+    recent_tracks = get_recent_tracks_from_playlists(source_playlist_ids)
 
     playlists = sp.current_user_playlists()['items']
     target_playlist = next((p for p in playlists if p['name'] == target_playlist_name), None)
@@ -60,8 +64,7 @@ def update_recent_tracks_playlist(source_playlist_id, target_playlist_name):
         target_playlist = sp.user_playlist_create(user_id, target_playlist_name, public=True)
 
     if recent_tracks:
-
-		# List newest tracks first
+        # List newest tracks first
         recent_tracks.reverse()
         sp.playlist_add_items(target_playlist['id'], recent_tracks)
         print(f"Updated playlist '{target_playlist_name}' with {len(recent_tracks)} tracks.")
@@ -69,7 +72,7 @@ def update_recent_tracks_playlist(source_playlist_id, target_playlist_name):
         print("No recent tracks found to add.")
 
 if __name__ == "__main__":
-    SOURCE_PLAYLIST_ID = getenv('SOURCE_PLAYLIST_ID')
+    SOURCE_PLAYLIST_IDS = getenv('SOURCE_PLAYLIST_IDS').split(',')
     TARGET_PLAYLIST_NAME = getenv('TARGET_PLAYLIST_NAME')
 
-    update_recent_tracks_playlist(SOURCE_PLAYLIST_ID, TARGET_PLAYLIST_NAME)
+    update_recent_tracks_playlist(SOURCE_PLAYLIST_IDS, TARGET_PLAYLIST_NAME)
