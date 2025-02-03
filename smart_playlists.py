@@ -64,8 +64,6 @@ def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
         target_playlist = sp.user_playlist_create(user_id, target_playlist_name, public=True)
 
     if recent_tracks:
-        # List newest tracks first
-        recent_tracks.reverse()
         sp.playlist_add_items(target_playlist['id'], recent_tracks)
         print(f"Updated playlist '{target_playlist_name}' with {len(recent_tracks)} tracks.")
     else:
