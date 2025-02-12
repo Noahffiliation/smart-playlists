@@ -45,11 +45,19 @@ def get_recent_tracks_from_playlists(playlist_ids):
         for item in tracks:
             added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
             if added_at > one_month_ago:
-                recent_tracks.append(item['track']['uri'])
+                recent_tracks.append({'uri': item['track']['uri'], 'added_at': added_at})
 
-    # Remove duplicate tracks
-    recent_tracks = list(set(recent_tracks))
-    return recent_tracks
+    unique_tracks = {}
+    for track in recent_tracks:
+        uri = track['uri']
+        if uri not in unique_tracks or track['added_at'] > unique_tracks[uri]['added_at']:
+            unique_tracks[uri] = track
+
+    # Sort tracks by newest first
+    sorted_tracks = sorted(unique_tracks.values(), key=lambda x: x['added_at'], reverse=True)
+
+    sorted_track_uris = [track['uri'] for track in sorted_tracks]
+    return sorted_track_uris
 
 def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
     recent_tracks = get_recent_tracks_from_playlists(source_playlist_ids)
