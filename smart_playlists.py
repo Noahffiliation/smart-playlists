@@ -14,7 +14,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
     redirect_uri=REDIRECT_URI,
-    scope='playlist-modify-public playlist-read-private'
+    scope='playlist-modify-public playlist-read-private user-library-read'
 ))
 
 def get_all_playlist_tracks(playlist_id):
@@ -33,6 +33,24 @@ def get_all_playlist_tracks(playlist_id):
 
     return tracks
 
+def get_liked_songs():
+
+	# Fetch all liked songs, 50 at a time since that's the maximum limit for spotipy
+    liked_tracks = []
+    offset = 0
+    limit = 50
+    while True:
+        results = sp.current_user_saved_tracks(limit=limit, offset=offset)
+        if not results['items']:
+            break
+        liked_tracks.extend([{
+            'track': item['track'],
+            'added_at': item['added_at']
+        } for item in results['items']])
+        offset += limit
+
+    return liked_tracks
+
 def get_recent_tracks_from_playlists(playlist_ids):
     recent_tracks = []
     one_month_ago = datetime.now() - timedelta(days=30)
@@ -46,6 +64,13 @@ def get_recent_tracks_from_playlists(playlist_ids):
             added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
             if added_at > one_month_ago:
                 recent_tracks.append({'uri': item['track']['uri'], 'added_at': added_at})
+
+    print("Processing Liked Songs")
+    liked_tracks = get_liked_songs()
+    recent_tracks.extend([{
+        'uri': item['track']['uri'],
+        'added_at': datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
+    } for item in liked_tracks])
 
     unique_tracks = {}
     for track in recent_tracks:
@@ -72,8 +97,15 @@ def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
         target_playlist = sp.user_playlist_create(user_id, target_playlist_name, public=True)
 
     if recent_tracks:
-        sp.playlist_add_items(target_playlist['id'], recent_tracks)
-        print(f"Updated playlist '{target_playlist_name}' with {len(recent_tracks)} tracks.")
+
+		# Add in batches of 100 since that's the limit for Spotify API
+        batch_size = 100
+        for i in range(0, len(recent_tracks), batch_size):
+            batch = recent_tracks[i:i + batch_size]
+            sp.playlist_add_items(target_playlist['id'], batch)
+            print(f"Added batch of {len(batch)} tracks")
+
+        print(f"Updated {target_playlist_name} with {len(recent_tracks)} recent tracks")
     else:
         print("No recent tracks found to add.")
 
