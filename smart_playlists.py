@@ -65,12 +65,12 @@ def get_recent_tracks_from_playlists(playlist_ids):
             if added_at > one_month_ago:
                 recent_tracks.append({'uri': item['track']['uri'], 'added_at': added_at})
 
-    print("Processing Liked Songs")
+    print("Fetching tracks from Liked Songs")
     liked_tracks = get_liked_songs()
-    recent_tracks.extend([{
-        'uri': item['track']['uri'],
-        'added_at': datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
-    } for item in liked_tracks])
+    for item in liked_tracks:
+        added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
+        if added_at > one_month_ago:
+            recent_tracks.append({'uri': item['track']['uri'], 'added_at': added_at})
 
     unique_tracks = {}
     for track in recent_tracks:
