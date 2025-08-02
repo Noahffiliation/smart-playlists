@@ -3,6 +3,7 @@ from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta
 from os import getenv
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -17,6 +18,8 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     scope='playlist-modify-public playlist-read-private user-library-read'
 ))
 
+date_format = '%Y-%m-%dT%H:%M:%SZ'
+
 def get_all_playlist_tracks(playlist_id):
 
 	# Fetch all tracks in the playlist, 100 at a time since that's the maximum limit for spotipy
@@ -24,11 +27,19 @@ def get_all_playlist_tracks(playlist_id):
     offset = 0
     limit = 100
     while True:
-        results = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
-        tracks.extend(results['items'])
-        if results['next']:
+        try:
+            results = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
+
+			# Filter out None items and tracks that are None
+            tracks.extend([item for item in results['items'] if item and item.get('track')])
+            if not results['next']:
+                break
+
             offset += limit
-        else:
+            time.sleep(0.1)
+
+        except Exception as e:
+            print(f"Error fetching playlist tracks: {e}")
             break
 
     return tracks
@@ -52,37 +63,79 @@ def get_liked_songs():
     return liked_tracks
 
 def get_recent_tracks_from_playlists(playlist_ids):
-    recent_tracks = []
     one_month_ago = datetime.now() - timedelta(days=30)
-    print(f"One month ago: {one_month_ago}")
+    print(f"\nFinding tracks added since {one_month_ago.date()}\n")
 
+    # Process regular playlists
+    playlist_tracks = _get_recent_playlist_tracks(playlist_ids, one_month_ago)
+
+    # Process liked songs
+    liked_tracks = _get_recent_liked_tracks(one_month_ago)
+
+    # Combine and process all tracks
+    all_tracks = playlist_tracks + liked_tracks
+    return _process_and_sort_tracks(all_tracks)
+
+def _get_recent_playlist_tracks(playlist_ids, cutoff_date):
+    recent_tracks = []
     for playlist_id in playlist_ids:
-        print(f"Fetching tracks from playlist: {sp.playlist(playlist_id)['name']}")
-        tracks = get_all_playlist_tracks(playlist_id)
+        try:
+            playlist = sp.playlist(playlist_id)
+            print(f"Processing playlist: {playlist['name']}")
+            tracks = get_all_playlist_tracks(playlist_id)
+            recent_tracks.extend(_process_playlist_tracks(tracks, cutoff_date))
+        except Exception as e:
+            print(f"Error processing playlist {playlist_id}: {e}")
+    return recent_tracks
 
-        for item in tracks:
-            added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
-            if added_at > one_month_ago:
-                recent_tracks.append({'uri': item['track']['uri'], 'added_at': added_at})
+def _process_playlist_tracks(tracks, cutoff_date):
+    processed_tracks = []
+    for item in tracks:
+        try:
+            track_data = _extract_track_data(item, cutoff_date)
+            if track_data:
+                processed_tracks.append(track_data)
+        except Exception as e:
+            print(f"Error processing track: {e}")
+    return processed_tracks
 
+def _extract_track_data(item, cutoff_date):
+    if not item or not item.get('track') or not item.get('added_at'):
+        print(f"Skipping invalid track item: {item}")
+        return None
+
+    added_at = datetime.strptime(item['added_at'], date_format)
+    if added_at <= cutoff_date:
+        return None
+
+    return {
+        'uri': item['track']['uri'],
+        'added_at': added_at,
+        'name': item['track'].get('name', 'Unknown'),
+        'artist': item['track']['artists'][0]['name'] if item['track'].get('artists') else 'Unknown'
+    }
+
+def _get_recent_liked_tracks(cutoff_date):
     print("Fetching tracks from Liked Songs")
     liked_tracks = get_liked_songs()
-    for item in liked_tracks:
-        added_at = datetime.strptime(item['added_at'], '%Y-%m-%dT%H:%M:%SZ')
-        if added_at > one_month_ago:
-            recent_tracks.append({'uri': item['track']['uri'], 'added_at': added_at})
+    return [
+        {'uri': item['track']['uri'], 'added_at': datetime.strptime(item['added_at'], date_format)}
+        for item in liked_tracks
+        if datetime.strptime(item['added_at'], date_format) > cutoff_date
+    ]
 
+def _process_and_sort_tracks(tracks):
     unique_tracks = {}
-    for track in recent_tracks:
+    for track in tracks:
         uri = track['uri']
         if uri not in unique_tracks or track['added_at'] > unique_tracks[uri]['added_at']:
             unique_tracks[uri] = track
 
-    # Sort tracks by newest first
-    sorted_tracks = sorted(unique_tracks.values(), key=lambda x: x['added_at'], reverse=True)
-
-    sorted_track_uris = [track['uri'] for track in sorted_tracks]
-    return sorted_track_uris
+    return [track['uri'] for track in sorted(
+        unique_tracks.values(),
+        key=lambda x: x['added_at'],
+        reverse=True
+    )]
 
 def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
     recent_tracks = get_recent_tracks_from_playlists(source_playlist_ids)
