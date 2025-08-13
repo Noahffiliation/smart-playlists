@@ -37,12 +37,16 @@ Create `.env`
 touch .env
 ```
 Add info for `CLIENT_ID` and `CLIENT_SECRET` from the Spotify Developer App Settings
+
 A good default for `REDIRECT_URI` is `http://localhost:8888/callback`, make sure it matches in the Spotify Developer App settings
+
 `SOURCE_PLAYLIST_ID` is from your public Spotify playlist share link
+
 `TARGET_PLAYLIST_NAME` is the name of your new playlist
 
 ## Usage <a name="usage"></a>
 Once you fill out your `.env`, you can run the Python file to test it out
+
 Use either a cronjob or Windows Task Scheduler to run the script periodically
 
 ## Built Using <a name = "built_using"></a>
