@@ -4,12 +4,15 @@ from datetime import datetime, timedelta
 from os import getenv
 from dotenv import load_dotenv
 import time
+import pylast
 
 load_dotenv()
 
 CLIENT_ID = getenv('CLIENT_ID')
 CLIENT_SECRET = getenv('CLIENT_SECRET')
-REDIRECT_URI = getenv('REDIRECT_URI')  # Must match your Spotify app settings
+REDIRECT_URI = getenv('REDIRECT_URI')
+LASTFM_API_KEY = getenv('LASTFM_API_KEY')
+LASTFM_USERNAME = getenv('LASTFM_USERNAME')
 
 sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     client_id=CLIENT_ID,
@@ -18,35 +21,31 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     scope='playlist-modify-public playlist-read-private user-library-read'
 ))
 
+network = pylast.LastFMNetwork(
+    api_key=LASTFM_API_KEY,
+    username=LASTFM_USERNAME
+)
+
 date_format = '%Y-%m-%dT%H:%M:%SZ'
 
 def get_all_playlist_tracks(playlist_id):
-
-	# Fetch all tracks in the playlist, 100 at a time since that's the maximum limit for spotipy
     tracks = []
     offset = 0
     limit = 100
     while True:
         try:
             results = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
-
-			# Filter out None items and tracks that are None
             tracks.extend([item for item in results['items'] if item and item.get('track')])
             if not results['next']:
                 break
-
             offset += limit
             time.sleep(0.1)
-
         except Exception as e:
             print(f"Error fetching playlist tracks: {e}")
             break
-
     return tracks
 
 def get_liked_songs():
-
-	# Fetch all liked songs, 50 at a time since that's the maximum limit for spotipy
     liked_tracks = []
     offset = 0
     limit = 50
@@ -59,20 +58,13 @@ def get_liked_songs():
             'added_at': item['added_at']
         } for item in results['items']])
         offset += limit
-
     return liked_tracks
 
 def get_recent_tracks_from_playlists(playlist_ids):
     one_month_ago = datetime.now() - timedelta(days=30)
     print(f"\nFinding tracks added since {one_month_ago.date()}\n")
-
-    # Process regular playlists
     playlist_tracks = _get_recent_playlist_tracks(playlist_ids, one_month_ago)
-
-    # Process liked songs
     liked_tracks = _get_recent_liked_tracks(one_month_ago)
-
-    # Combine and process all tracks
     all_tracks = playlist_tracks + liked_tracks
     return _process_and_sort_tracks(all_tracks)
 
@@ -103,11 +95,9 @@ def _extract_track_data(item, cutoff_date):
     if not item or not item.get('track') or not item.get('added_at'):
         print(f"Skipping invalid track item: {item}")
         return None
-
     added_at = datetime.strptime(item['added_at'], date_format)
     if added_at <= cutoff_date:
         return None
-
     return {
         'uri': item['track']['uri'],
         'added_at': added_at,
@@ -130,7 +120,6 @@ def _process_and_sort_tracks(tracks):
         uri = track['uri']
         if uri not in unique_tracks or track['added_at'] > unique_tracks[uri]['added_at']:
             unique_tracks[uri] = track
-
     return [track['uri'] for track in sorted(
         unique_tracks.values(),
         key=lambda x: x['added_at'],
@@ -139,31 +128,186 @@ def _process_and_sort_tracks(tracks):
 
 def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
     recent_tracks = get_recent_tracks_from_playlists(source_playlist_ids)
-
     playlists = sp.current_user_playlists()['items']
     target_playlist = next((p for p in playlists if p['name'] == target_playlist_name), None)
-
     if target_playlist:
         sp.playlist_replace_items(target_playlist['id'], [])
     else:
         user_id = sp.current_user()['id']
         target_playlist = sp.user_playlist_create(user_id, target_playlist_name, public=True)
-
     if recent_tracks:
-
-		# Add in batches of 100 since that's the limit for Spotify API
         batch_size = 100
         for i in range(0, len(recent_tracks), batch_size):
             batch = recent_tracks[i:i + batch_size]
             sp.playlist_add_items(target_playlist['id'], batch)
             print(f"Added batch of {len(batch)} tracks")
-
         print(f"Updated {target_playlist_name} with {len(recent_tracks)} recent tracks")
     else:
         print("No recent tracks found to add.")
 
+def _create_track_dict(track):
+    """Create a standardized track dictionary"""
+    if not track or not track.get('uri'):
+        return None
+
+    artist = track['artists'][0]['name'] if track.get('artists') else 'Unknown'
+    name = track.get('name', 'Unknown')
+
+    return {
+        'uri': track['uri'],
+        'name': name,
+        'artist': artist,
+        'key': f"{artist.lower()}|||{name.lower()}"
+    }
+
+def _add_liked_songs_to_library(all_tracks):
+    """Add liked songs to the track library"""
+    print("Fetching liked songs...")
+    liked = get_liked_songs()
+
+    for item in liked:
+        track_dict = _create_track_dict(item['track'])
+        if track_dict:
+            all_tracks[track_dict['uri']] = track_dict
+
+    print(f"Found {len(all_tracks)} liked songs")
+
+def _add_playlist_tracks_to_library(all_tracks, playlist_ids):
+    """Add playlist tracks to the track library"""
+    for playlist_id in playlist_ids:
+        try:
+            playlist = sp.playlist(playlist_id)
+            print(f"Fetching tracks from: {playlist['name']}")
+            tracks = get_all_playlist_tracks(playlist_id)
+
+            for item in tracks:
+                if item and item.get('track'):
+                    track_dict = _create_track_dict(item['track'])
+                    if track_dict and track_dict['uri'] not in all_tracks:
+                        all_tracks[track_dict['uri']] = track_dict
+        except Exception as e:
+            print(f"Error processing playlist {playlist_id}: {e}")
+
+def get_all_spotify_library_tracks(playlist_ids):
+    """Get all unique tracks from Spotify library (liked songs + playlists)"""
+    print("\n=== Building Spotify Library ===")
+
+    all_tracks = {}
+    _add_liked_songs_to_library(all_tracks)
+    _add_playlist_tracks_to_library(all_tracks, playlist_ids)
+
+    print(f"\nTotal unique tracks in library: {len(all_tracks)}\n")
+    return all_tracks
+
+def get_lastfm_track_playcount(artist, track):
+    """Get playcount for a specific track from Last.fm"""
+    try:
+        lastfm_track = network.get_track(artist, track)
+        playcount = lastfm_track.get_userplaycount()
+        return playcount if playcount else 0
+    except Exception:
+        return 0
+
+def match_spotify_with_lastfm(spotify_tracks):
+    """Match Spotify tracks with Last.fm playcounts"""
+    print("=== Matching Spotify tracks with Last.fm scrobbles ===")
+
+    matched_tracks = []
+    total = len(spotify_tracks)
+
+    for idx, (uri, track_data) in enumerate(spotify_tracks.items(), 1):
+        if idx % 50 == 0:
+            print(f"Processing {idx}/{total}...")
+            time.sleep(1)  # Rate limiting
+
+        playcount = get_lastfm_track_playcount(track_data['artist'], track_data['name'])
+
+        matched_tracks.append({
+            'uri': uri,
+            'name': track_data['name'],
+            'artist': track_data['artist'],
+            'playcount': playcount
+        })
+
+        time.sleep(0.2)  # Rate limiting for Last.fm API
+
+    print(f"\nMatched {len(matched_tracks)} tracks with Last.fm data\n")
+    return matched_tracks
+
+def create_or_update_playlist(playlist_name, track_uris):
+    """Create or update a playlist with given tracks"""
+    playlists = sp.current_user_playlists()['items']
+    target_playlist = next((p for p in playlists if p['name'] == playlist_name), None)
+
+    if target_playlist:
+        sp.playlist_replace_items(target_playlist['id'], [])
+    else:
+        user_id = sp.current_user()['id']
+        target_playlist = sp.user_playlist_create(user_id, playlist_name, public=True)
+
+    if track_uris:
+        batch_size = 100
+        for i in range(0, len(track_uris), batch_size):
+            batch = track_uris[i:i + batch_size]
+            sp.playlist_add_items(target_playlist['id'], batch)
+        print(f"Updated '{playlist_name}' with {len(track_uris)} tracks")
+    else:
+        print(f"No tracks to add to '{playlist_name}'")
+
+def update_top_25_playlist(playlist_ids, playlist_name):
+    """Create/update playlist with top 25 most played tracks"""
+    print("\n" + "="*50)
+    print("CREATING TOP 25 MOST PLAYED PLAYLIST")
+    print("="*50)
+
+    spotify_library = get_all_spotify_library_tracks(playlist_ids)
+    matched_tracks = match_spotify_with_lastfm(spotify_library)
+
+    # Filter tracks with at least 1 play and sort by playcount descending
+    played_tracks = [t for t in matched_tracks if t['playcount'] > 0]
+    top_25 = sorted(played_tracks, key=lambda x: x['playcount'], reverse=True)[:25]
+
+    print("\n=== Top 25 Most Played Tracks ===")
+    for i, track in enumerate(top_25, 1):
+        print(f"{i}. {track['artist']} - {track['name']} ({track['playcount']} plays)")
+
+    track_uris = [t['uri'] for t in top_25]
+    create_or_update_playlist(playlist_name, track_uris)
+
+def update_bottom_25_playlist(playlist_ids, playlist_name):
+    """Create/update playlist with top 25 least played tracks (minimum 1 play)"""
+    print("\n" + "="*50)
+    print("CREATING TOP 25 LEAST PLAYED PLAYLIST")
+    print("="*50)
+
+    spotify_library = get_all_spotify_library_tracks(playlist_ids)
+    matched_tracks = match_spotify_with_lastfm(spotify_library)
+
+    # Filter tracks with at least 1 play and sort by playcount ascending
+    played_tracks = [t for t in matched_tracks if t['playcount'] > 0]
+    bottom_25 = sorted(played_tracks, key=lambda x: x['playcount'])[:25]
+
+    print("\n=== Top 25 Least Played Tracks ===")
+    for i, track in enumerate(bottom_25, 1):
+        print(f"{i}. {track['artist']} - {track['name']} ({track['playcount']} plays)")
+
+    track_uris = [t['uri'] for t in bottom_25]
+    create_or_update_playlist(playlist_name, track_uris)
+
 if __name__ == "__main__":
     SOURCE_PLAYLIST_IDS = getenv('SOURCE_PLAYLIST_IDS').split(',')
     TARGET_PLAYLIST_NAME = getenv('TARGET_PLAYLIST_NAME')
+    TOP_25_PLAYLIST_NAME = getenv('TOP_25_PLAYLIST_NAME', 'Top 25 Most Played')
+    BOTTOM_25_PLAYLIST_NAME = getenv('BOTTOM_25_PLAYLIST_NAME', 'Top 25 Least Played')
 
+    # Update recent tracks playlist
+    print("\n" + "="*50)
+    print("UPDATING RECENT TRACKS PLAYLIST")
+    print("="*50)
     update_recent_tracks_playlist(SOURCE_PLAYLIST_IDS, TARGET_PLAYLIST_NAME)
+
+    # Update top 25 most played playlist
+    update_top_25_playlist(SOURCE_PLAYLIST_IDS, TOP_25_PLAYLIST_NAME)
+
+    # Update bottom 25 least played playlist
+    update_bottom_25_playlist(SOURCE_PLAYLIST_IDS, BOTTOM_25_PLAYLIST_NAME)
