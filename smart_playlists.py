@@ -254,45 +254,39 @@ def create_or_update_playlist(playlist_name, track_uris):
     else:
         print(f"No tracks to add to '{playlist_name}'")
 
-def update_top_25_playlist(playlist_ids, playlist_name):
-    """Create/update playlist with top 25 most played tracks"""
+def update_playcount_playlists(playlist_ids, top_playlist_name, bottom_playlist_name):
+    """Create/update both top 25 and bottom 25 playlists with a single library fetch"""
     print("\n" + "="*50)
-    print("CREATING TOP 25 MOST PLAYED PLAYLIST")
+    print("CREATING PLAYCOUNT-BASED PLAYLISTS")
     print("="*50)
 
     spotify_library = get_all_spotify_library_tracks(playlist_ids)
     matched_tracks = match_spotify_with_lastfm(spotify_library)
 
-    # Filter tracks with at least 1 play and sort by playcount descending
+    # Filter tracks with at least 1 play
     played_tracks = [t for t in matched_tracks if t['playcount'] > 0]
+
+    # Sort by playcount descending for top 25
     top_25 = sorted(played_tracks, key=lambda x: x['playcount'], reverse=True)[:25]
 
+    # Sort by playcount ascending for bottom 25
+    bottom_25 = sorted(played_tracks, key=lambda x: x['playcount'])[:25]
+
+    # Display and create top 25 playlist
     print("\n=== Top 25 Most Played Tracks ===")
     for i, track in enumerate(top_25, 1):
         print(f"{i}. {track['artist']} - {track['name']} ({track['playcount']} plays)")
 
-    track_uris = [t['uri'] for t in top_25]
-    create_or_update_playlist(playlist_name, track_uris)
+    top_track_uris = [t['uri'] for t in top_25]
+    create_or_update_playlist(top_playlist_name, top_track_uris)
 
-def update_bottom_25_playlist(playlist_ids, playlist_name):
-    """Create/update playlist with top 25 least played tracks (minimum 1 play)"""
-    print("\n" + "="*50)
-    print("CREATING TOP 25 LEAST PLAYED PLAYLIST")
-    print("="*50)
-
-    spotify_library = get_all_spotify_library_tracks(playlist_ids)
-    matched_tracks = match_spotify_with_lastfm(spotify_library)
-
-    # Filter tracks with at least 1 play and sort by playcount ascending
-    played_tracks = [t for t in matched_tracks if t['playcount'] > 0]
-    bottom_25 = sorted(played_tracks, key=lambda x: x['playcount'])[:25]
-
+    # Display and create bottom 25 playlist
     print("\n=== Top 25 Least Played Tracks ===")
     for i, track in enumerate(bottom_25, 1):
         print(f"{i}. {track['artist']} - {track['name']} ({track['playcount']} plays)")
 
-    track_uris = [t['uri'] for t in bottom_25]
-    create_or_update_playlist(playlist_name, track_uris)
+    bottom_track_uris = [t['uri'] for t in bottom_25]
+    create_or_update_playlist(bottom_playlist_name, bottom_track_uris)
 
 if __name__ == "__main__":
     SOURCE_PLAYLIST_IDS = getenv('SOURCE_PLAYLIST_IDS').split(',')
@@ -306,8 +300,5 @@ if __name__ == "__main__":
     print("="*50)
     update_recent_tracks_playlist(SOURCE_PLAYLIST_IDS, TARGET_PLAYLIST_NAME)
 
-    # Update top 25 most played playlist
-    update_top_25_playlist(SOURCE_PLAYLIST_IDS, TOP_25_PLAYLIST_NAME)
-
-    # Update bottom 25 least played playlist
-    update_bottom_25_playlist(SOURCE_PLAYLIST_IDS, BOTTOM_25_PLAYLIST_NAME)
+    # Update both playcount playlists
+    update_playcount_playlists(SOURCE_PLAYLIST_IDS, TOP_25_PLAYLIST_NAME, BOTTOM_25_PLAYLIST_NAME)
