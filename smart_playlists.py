@@ -48,7 +48,7 @@ makedirs(LOGS_DIR, exist_ok=True)
 # Configure logging with timestamp in filename
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 log_file = join(LOGS_DIR, f'smart_playlists_{timestamp}.log')
-formatter = logging.Formatter('%(message)s', encoding='utf-8')  # Add UTF-8 encoding
+formatter = logging.Formatter('%(message)s')
 
 # File handler with unique filename and UTF-8 encoding
 file_handler = logging.FileHandler(log_file, encoding='utf-8')
