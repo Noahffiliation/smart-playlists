@@ -2,7 +2,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta
 from os import getenv, makedirs
-from os.path import join, exists
+from os.path import join
 from dotenv import load_dotenv
 import time
 import pylast
