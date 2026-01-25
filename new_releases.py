@@ -188,8 +188,8 @@ def main():
         sp = get_spotify_client()
 
         # Get date from one week ago
-        one_week_ago = datetime.now() - timedelta(days=7)
-        logger.info(f"Looking for releases since: {one_week_ago.strftime('%Y-%m-%d')}")
+        one_day_ago = datetime.now() - timedelta(days=1)
+        logger.info(f"Looking for releases since: {one_day_ago.strftime('%Y-%m-%d')}")
 
         # Get followed artists
         artists = get_followed_artists(sp, logger)
@@ -213,7 +213,7 @@ def main():
         for i, artist in enumerate(artists, 1):
             logger.info(f"[{i}/{len(artists)}] Checking {artist['name']}...")
 
-            new_releases = get_artist_new_releases(sp, artist['id'], one_week_ago)
+            new_releases = get_artist_new_releases(sp, artist['id'], one_day_ago)
 
             for album in new_releases:
                 # Skip if we've already processed this album

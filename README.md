@@ -11,7 +11,7 @@
 ## About <a name = "about"></a>
 As a heavy Spotify user, I wanted to replicate iTunes' Smart Playlists feature in Spotify, specifically Recently Added, Top 25 Most Played, and Top 25 Least Played since I add music to my Spotify library/playlists all the time. Because my playlists are rather large at this point (1,000+ tracks), recent tracks don't get played very often and get lost in the sauce. This script running periodically keeps an automatically updated playlist of recently added tracks to my library in the last month as well as my top 25 most and least played tracks based on my last.fm scrobbles, since Spotify holds user plays in a vault until December of each year.
 
-I also added a script to get new releases from artists I follow to a playlist, since Spotify's What's New feed sometimes delays new releases by a few days to a week. Most artists I follow tend to drop new music on Friday midnight EST, so I run this just after that time to get the new releases, which also lines up with Spotify's Release Radar weekly update.
+I also added a script to get new releases from artists I follow to a playlist, since Spotify's What's New feed sometimes delays showing new releases by a few days to a week.
 
 ### Note <a name = "note"></a>
 This was more-or-less completely [vibe-coded](https://en.wikipedia.org/wiki/Vibe_coding) with [DeepSeek](https://chat.deepseek.com/) when it first became publically available and later edited and expanded with [Claude](https://claude.ai/). I wanted to try out the newest AI chatbot and also try out actual vibe coding and see how it goes for an inconsequential project. Generally, I'm pleasantly surprised with how well this turned out, functions just as intended.
