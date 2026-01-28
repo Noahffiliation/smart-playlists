@@ -9,6 +9,12 @@ jobs:
   sonarqube:
     name: SonarQube
     runs-on: ubuntu-latest
+    env:
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
+      LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+      LASTFM_USERNAME: ${{ secrets.LASTFM_USERNAME }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,7 +32,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=auto_watch_later --cov-report=term-missing --cov-report=xml tests/
+          pytest --cov=. --cov-report=term-missing --cov-report=xml tests/
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
         env:

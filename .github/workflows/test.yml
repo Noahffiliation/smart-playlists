@@ -10,6 +10,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
+      LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+      LASTFM_USERNAME: ${{ secrets.LASTFM_USERNAME }}
     steps:
     - uses: actions/checkout@v4
 
@@ -26,9 +32,10 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        pytest --cov=auto_watch_later --cov-report=term-missing --cov-report=xml tests/
+        pytest --cov=. --cov-report=term-missing --cov-report=xml tests/
 
     - name: Verify coverage threshold
       run: |
         # Fail if coverage is less than 80%
-        pytest --cov=auto_watch_later --cov-fail-under=80 tests/
+        pytest --cov=. --cov-fail-under=80 tests/
+
