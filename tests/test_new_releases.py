@@ -128,8 +128,27 @@ def test_main(mock_sp, mock_logger):
          patch('new_releases.get_followed_artists', return_value=[{'name': 'A', 'id': 'aid'}]), \
          patch('new_releases.get_all_library_tracks', return_value=set()), \
          patch('new_releases.create_or_get_playlist', return_value='pid'), \
+         patch('new_releases.get_playlist_tracks', return_value=set()), \
          patch('new_releases.get_artist_new_releases', return_value=[{'id': 'alb_id', 'name': 'Alb', 'release_date': '2026-01-28'}]), \
          patch('new_releases.get_album_tracks', return_value=['t1']):
 
         new_releases.main()
         mock_sp.playlist_add_items.assert_called()
+
+def test_main_excludes_target_playlist_tracks(mock_sp, mock_logger):
+    """Verify that tracks already in the target playlist are not added again"""
+    with patch('new_releases.setup_logging', return_value=mock_logger), \
+         patch('new_releases.get_spotify_client', return_value=mock_sp), \
+         patch('new_releases.get_followed_artists', return_value=[{'name': 'A', 'id': 'aid'}]), \
+         patch('new_releases.get_all_library_tracks', return_value=set()), \
+         patch('new_releases.create_or_get_playlist', return_value='pid'), \
+         patch('new_releases.get_playlist_tracks', return_value={'t1'}), \
+         patch('new_releases.get_artist_new_releases', return_value=[{'id': 'alb_id', 'name': 'Alb', 'release_date': '2026-01-28'}]), \
+         patch('new_releases.get_album_tracks', return_value=['t1', 't2']):
+
+        new_releases.main()
+
+        # Should only add t2, since t1 is in target playlist
+        mock_sp.playlist_add_items.assert_called_once()
+        args, _ = mock_sp.playlist_add_items.call_args
+        assert args[1] == ['t2']

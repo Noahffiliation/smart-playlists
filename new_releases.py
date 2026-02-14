@@ -194,12 +194,18 @@ def main():
         # Get followed artists
         artists = get_followed_artists(sp, logger)
 
-        # Get all library tracks (liked songs + source playlists)
-        library_tracks = get_all_library_tracks(sp, SOURCE_PLAYLIST_IDS, logger)
-
         # Create or get playlist
         playlist_name = "The News"
         playlist_id = create_or_get_playlist(sp, playlist_name, logger)
+
+        # Get all library tracks (liked songs + source playlists)
+        library_tracks = get_all_library_tracks(sp, SOURCE_PLAYLIST_IDS, logger)
+
+        # Add tracks from the target playlist itself to exclude them
+        logger.info(f"Fetching tracks from target playlist '{playlist_name}' to avoid duplicates...")
+        target_playlist_tracks = get_playlist_tracks(sp, playlist_id, logger)
+        library_tracks.update(target_playlist_tracks)
+        logger.info(f"Total tracks to exclude: {len(library_tracks)}")
 
         # Find new releases
         new_tracks_to_add = set()  # Use set to avoid duplicates
