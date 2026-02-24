@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 import time
 import pylast
 import logging
+import random
+from collections import defaultdict
+from functools import wraps
 
 load_dotenv()
 
@@ -63,6 +66,33 @@ logger = logging.getLogger('smart_playlists')
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
 logger.addHandler(print_handler)
+
+def retry_on_rate_limit(max_retries=3, initial_delay=1):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            retries = 0
+            while retries <= max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except pylast.WSError as e:
+                    if str(e.status) == "29":  # Rate limit exceeded
+                        retries += 1
+                        if retries > max_retries:
+                            logger.error(f"Last.fm rate limit exceeded after {max_retries} retries.")
+                            raise
+                        wait_time = initial_delay * (2 ** (retries - 1))
+                        logger.warning(f"Last.fm rate limit exceeded. Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Last.fm API error: {e}")
+                        raise
+                except Exception as e:
+                    logger.error(f"Last.fm API error: {e}")
+                    raise
+            return None
+        return wrapper
+    return decorator
 
 def get_all_playlist_tracks(playlist_id):
     tracks = []
@@ -235,6 +265,7 @@ def get_all_spotify_library_tracks(playlist_ids):
     logger.info(f"\nTotal unique tracks in library: {len(all_tracks)}\n")
     return all_tracks
 
+@retry_on_rate_limit()
 def get_lastfm_track_playcount(artist, track):
     """Get playcount for a specific track from Last.fm"""
     try:
@@ -244,19 +275,70 @@ def get_lastfm_track_playcount(artist, track):
     except Exception:
         return 0
 
+def get_all_lastfm_playcounts():
+    """Fetch all playcounts from Last.fm library in bulk"""
+    logger.info("=== Fetching all Last.fm playcounts in bulk ===")
+    user = network.get_user(LASTFM_USERNAME)
+    playcounts = {}
+    limit = 200 # Max tracks per page
+    page = 1
+
+    while True:
+        try:
+            logger.info(f"Fetching Last.fm library page {page}...")
+            top_tracks = user.get_top_tracks(period=pylast.PERIOD_OVERALL, limit=limit, page=page)
+            if not top_tracks:
+                break
+
+            for top_track in top_tracks:
+                artist = top_track.item.artist.name.lower()
+                track_name = top_track.item.title.lower()
+                key = f"{artist}|||{track_name}"
+                playcounts[key] = int(top_track.weight)
+
+            if len(top_tracks) < limit:
+                break
+
+            page += 1
+            time.sleep(0.5) # Safety delay between page fetches
+        except pylast.WSError as e:
+            if str(e.status) == "29":  # Rate limit exceeded
+                logger.warning("Rate limit hit during bulk fetch. Waiting 5s...")
+                time.sleep(5)
+                continue
+            else:
+                logger.error(f"Error during bulk fetch: {e}")
+                break
+        except Exception as e:
+            logger.error(f"Error during bulk fetch: {e}")
+            break
+
+    logger.info(f"Successfully cached {len(playcounts)} tracks from Last.fm")
+    return playcounts
+
 def match_spotify_with_lastfm(spotify_tracks):
-    """Match Spotify tracks with Last.fm playcounts"""
+    """Match Spotify tracks with Last.fm playcounts using bulk-fetched data"""
     logger.info("=== Matching Spotify tracks with Last.fm scrobbles ===")
+
+    # Pre-fetch all Last.fm playcounts
+    lastfm_library = get_all_lastfm_playcounts()
 
     matched_tracks = []
     total = len(spotify_tracks)
+    missing_tracks = []
 
     for idx, (uri, track_data) in enumerate(spotify_tracks.items(), 1):
-        if idx % 50 == 0:
-            logger.info(f"Processing {idx}/{total}...")
-            time.sleep(1)  # Rate limiting
+        artist = track_data['artist'].lower()
+        name = track_data['name'].lower()
+        key = f"{artist}|||{name}"
 
-        playcount = get_lastfm_track_playcount(track_data['artist'], track_data['name'])
+        playcount = lastfm_library.get(key)
+
+        if playcount is None:
+            # If not in top tracks, it might have 0 plays or be hard to match
+            # We'll collect these for a second pass or just default to 0
+            playcount = 0
+            missing_tracks.append(track_data)
 
         matched_tracks.append({
             'uri': uri,
@@ -265,9 +347,13 @@ def match_spotify_with_lastfm(spotify_tracks):
             'playcount': playcount
         })
 
-        time.sleep(0.2)  # Rate limiting for Last.fm API
+        if idx % 100 == 0:
+            logger.info(f"Processed {idx}/{total} tracks...")
 
-    logger.info(f"\nMatched {len(matched_tracks)} tracks with Last.fm data\n")
+    logger.info(f"\nMatched {len(matched_tracks)} tracks with Last.fm data")
+    if missing_tracks:
+        logger.info(f"Note: {len(missing_tracks)} tracks were not found in Last.fm library (0 plays assumed)")
+
     return matched_tracks
 
 def create_or_update_playlist(playlist_name, track_uris):
@@ -305,8 +391,21 @@ def update_playcount_playlists(playlist_ids, top_playlist_name, bottom_playlist_
     # Sort by playcount descending for top 25
     top_25 = sorted(played_tracks, key=lambda x: x['playcount'], reverse=True)[:25]
 
-    # Sort by playcount ascending for bottom 25
-    bottom_25 = sorted(played_tracks, key=lambda x: x['playcount'])[:25]
+    # Group and shuffle for bottom 25 variety
+    playcount_groups = defaultdict(list)
+    for track in played_tracks:
+        playcount_groups[track['playcount']].append(track)
+
+    bottom_tracks = []
+    # Sort playcounts ascending
+    for pc in sorted(playcount_groups.keys()):
+        group = playcount_groups[pc]
+        random.SystemRandom().shuffle(group)
+        bottom_tracks.extend(group)
+        if len(bottom_tracks) >= 25:
+            break
+
+    bottom_25 = bottom_tracks[:25]
 
     # Display and create top 25 playlist
     logger.info("\n=== Top 25 Most Played Tracks ===")

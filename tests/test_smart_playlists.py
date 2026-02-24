@@ -1,4 +1,6 @@
 import pytest
+import pylast
+import time
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta
 import smart_playlists
@@ -144,13 +146,99 @@ def test_match_spotify_with_lastfm(mock_lastfm):
         'uri2': {'name': 'Name2', 'artist': 'Artist2'}
     }
 
-    with patch('smart_playlists.get_lastfm_track_playcount') as mock_pc:
-        mock_pc.side_effect = [10, 0]
+    with patch('smart_playlists.get_all_lastfm_playcounts') as mock_bulk:
+        mock_bulk.return_value = {
+            'artist1|||name1': 10,
+            'artist2|||name2': 5
+        }
 
         result = smart_playlists.match_spotify_with_lastfm(spotify_tracks)
         assert len(result) == 2
         assert result[0]['playcount'] == 10
-        assert result[1]['playcount'] == 0
+        assert result[1]['playcount'] == 5
+
+def test_get_all_lastfm_playcounts(mock_lastfm):
+    mock_user = MagicMock()
+    mock_lastfm.get_user.return_value = mock_user
+
+    # Mock two pages of tracks
+    track1 = MagicMock()
+    track1.item.artist.name = "Artist1"
+    track1.item.title = "Track1"
+    track1.weight = "10"
+
+    track2 = MagicMock()
+    track2.item.artist.name = "Artist2"
+    track2.item.title = "Track2"
+    track2.weight = "5"
+
+    # Page 1 returns 2 tracks (limit=2), Page 2 returns empty
+    # In the actual code, limit is 200, but we'll mock based on return length
+    mock_user.get_top_tracks.side_effect = [
+        [track1, track2],
+        []
+    ]
+
+    with patch('smart_playlists.LASTFM_USERNAME', 'test_user'):
+        # Force the limit to match our mock behavior for testing pagination
+        with patch('smart_playlists.time.sleep'):
+            # Temporarily patch the limit inside the function if needed,
+            # but we can just let it finish after first non-full page or empty page
+            result = smart_playlists.get_all_lastfm_playcounts()
+
+    assert len(result) == 2
+    assert result['artist1|||track1'] == 10
+    assert result['artist2|||track2'] == 5
+
+def test_retry_on_rate_limit():
+    mock_func = MagicMock()
+    # Create a mock WSError
+    rate_limit_error = pylast.WSError("network", "29", "rate limit")
+    mock_func.side_effect = [rate_limit_error, "success"]
+
+    @smart_playlists.retry_on_rate_limit(max_retries=2, initial_delay=0.1)
+    def test_func():
+        return mock_func()
+
+    with patch('smart_playlists.time.sleep'):
+        result = test_func()
+
+    assert result == "success"
+    assert mock_func.call_count == 2
+
+def test_retry_on_rate_limit_failure():
+    mock_func = MagicMock()
+    rate_limit_error = pylast.WSError("network", "29", "rate limit")
+    mock_func.side_effect = rate_limit_error
+
+    @smart_playlists.retry_on_rate_limit(max_retries=1, initial_delay=0.1)
+    def test_func():
+        return mock_func()
+
+    with patch('smart_playlists.time.sleep'):
+        with pytest.raises(pylast.WSError) as excinfo:
+            test_func()
+        assert str(excinfo.value.status) == "29"
+
+    assert mock_func.call_count == 2 # Initial + 1 retry
+
+def test_get_all_lastfm_playcounts_rate_limit(mock_lastfm):
+    mock_user = MagicMock()
+    mock_lastfm.get_user.return_value = mock_user
+
+    # Force a rate limit error then success
+    rate_limit_error = pylast.WSError("network", "29", "rate limit")
+    mock_user.get_top_tracks.side_effect = [
+        rate_limit_error,
+        []
+    ]
+
+    with patch('smart_playlists.LASTFM_USERNAME', 'test_user'), \
+         patch('smart_playlists.time.sleep'):
+        result = smart_playlists.get_all_lastfm_playcounts()
+
+    assert result == {}
+    assert mock_user.get_top_tracks.call_count == 2
 
 def test_create_or_update_playlist_exists(mock_spotify):
     mock_spotify.current_user_playlists.return_value = {'items': [{'name': 'P1', 'id': 'p1'}]}
