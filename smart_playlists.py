@@ -276,42 +276,34 @@ def get_lastfm_track_playcount(artist, track):
         return 0
 
 def get_all_lastfm_playcounts():
-    """Fetch all playcounts from Last.fm library in bulk"""
+    """Fetch all playcounts from Last.fm library in bulk using streaming API"""
     logger.info("=== Fetching all Last.fm playcounts in bulk ===")
     user = network.get_user(LASTFM_USERNAME)
     playcounts = {}
-    limit = 200 # Max tracks per page
-    page = 1
 
-    while True:
-        try:
-            logger.info(f"Fetching Last.fm library page {page}...")
-            top_tracks = user.get_top_tracks(period=pylast.PERIOD_OVERALL, limit=limit, page=page)
-            if not top_tracks:
-                break
+    try:
+        # pylast v7.x provides a streaming generator that handles pagination automatically.
+        # We iterate over this to get all tracks without manual page management.
+        top_tracks = user.get_top_tracks(period=pylast.PERIOD_OVERALL, stream=True)
 
-            for top_track in top_tracks:
-                artist = top_track.item.artist.name.lower()
-                track_name = top_track.item.title.lower()
-                key = f"{artist}|||{track_name}"
-                playcounts[key] = int(top_track.weight)
+        for top_track in top_tracks:
+            artist = top_track.item.artist.name.lower()
+            track_name = top_track.item.title.lower()
+            key = f"{artist}|||{track_name}"
 
-            if len(top_tracks) < limit:
-                break
+            # Since we could potentially get thousands of tracks, we only store the weight
+            playcounts[key] = int(top_track.weight)
 
-            page += 1
-            time.sleep(0.5) # Safety delay between page fetches
-        except pylast.WSError as e:
-            if str(e.status) == "29":  # Rate limit exceeded
-                logger.warning("Rate limit hit during bulk fetch. Waiting 5s...")
-                time.sleep(5)
-                continue
-            else:
-                logger.error(f"Error during bulk fetch: {e}")
-                break
-        except Exception as e:
+            if len(playcounts) > 0 and len(playcounts) % 500 == 0:
+                logger.info(f"Cached {len(playcounts)} tracks...")
+
+    except pylast.WSError as e:
+        if str(e.status) == "29":  # Rate limit exceeded
+            logger.warning("Rate limit hit during bulk fetch.")
+        else:
             logger.error(f"Error during bulk fetch: {e}")
-            break
+    except Exception as e:
+        logger.error(f"Error during bulk fetch: {e}")
 
     logger.info(f"Successfully cached {len(playcounts)} tracks from Last.fm")
     return playcounts

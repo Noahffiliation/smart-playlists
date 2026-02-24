@@ -161,7 +161,7 @@ def test_get_all_lastfm_playcounts(mock_lastfm):
     mock_user = MagicMock()
     mock_lastfm.get_user.return_value = mock_user
 
-    # Mock two pages of tracks
+    # Mock tracks
     track1 = MagicMock()
     track1.item.artist.name = "Artist1"
     track1.item.title = "Track1"
@@ -172,19 +172,11 @@ def test_get_all_lastfm_playcounts(mock_lastfm):
     track2.item.title = "Track2"
     track2.weight = "5"
 
-    # Page 1 returns 2 tracks (limit=2), Page 2 returns empty
-    # In the actual code, limit is 200, but we'll mock based on return length
-    mock_user.get_top_tracks.side_effect = [
-        [track1, track2],
-        []
-    ]
+    # get_top_tracks returns an iterable list in our mock
+    mock_user.get_top_tracks.return_value = [track1, track2]
 
     with patch('smart_playlists.LASTFM_USERNAME', 'test_user'):
-        # Force the limit to match our mock behavior for testing pagination
-        with patch('smart_playlists.time.sleep'):
-            # Temporarily patch the limit inside the function if needed,
-            # but we can just let it finish after first non-full page or empty page
-            result = smart_playlists.get_all_lastfm_playcounts()
+        result = smart_playlists.get_all_lastfm_playcounts()
 
     assert len(result) == 2
     assert result['artist1|||track1'] == 10
@@ -226,19 +218,16 @@ def test_get_all_lastfm_playcounts_rate_limit(mock_lastfm):
     mock_user = MagicMock()
     mock_lastfm.get_user.return_value = mock_user
 
-    # Force a rate limit error then success
+    # Force a rate limit error
     rate_limit_error = pylast.WSError("network", "29", "rate limit")
-    mock_user.get_top_tracks.side_effect = [
-        rate_limit_error,
-        []
-    ]
+    mock_user.get_top_tracks.side_effect = rate_limit_error
 
     with patch('smart_playlists.LASTFM_USERNAME', 'test_user'), \
          patch('smart_playlists.time.sleep'):
         result = smart_playlists.get_all_lastfm_playcounts()
 
     assert result == {}
-    assert mock_user.get_top_tracks.call_count == 2
+    assert mock_user.get_top_tracks.call_count == 1
 
 def test_create_or_update_playlist_exists(mock_spotify):
     mock_spotify.current_user_playlists.return_value = {'items': [{'name': 'P1', 'id': 'p1'}]}
