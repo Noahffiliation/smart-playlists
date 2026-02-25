@@ -187,9 +187,9 @@ def main():
         logger.info("Initializing Spotify client...")
         sp = get_spotify_client()
 
-        # Get date from one week ago
-        one_day_ago = datetime.now() - timedelta(days=1)
-        logger.info(f"Looking for releases since: {one_day_ago.strftime('%Y-%m-%d')}")
+        # Get date from 24 hours ago
+        one_day_ago = datetime.now() - timedelta(hours=24)
+        logger.info(f"Looking for releases since: {one_day_ago.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Get followed artists
         artists = get_followed_artists(sp, logger)

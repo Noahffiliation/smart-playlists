@@ -10,6 +10,8 @@ import logging
 import random
 from collections import defaultdict
 from functools import wraps
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 load_dotenv()
 
@@ -32,6 +34,7 @@ network = pylast.LastFMNetwork(
 )
 
 date_format = '%Y-%m-%dT%H:%M:%SZ'
+library_lock = threading.Lock()
 
 
 class PrintAndLogHandler(logging.Handler):
@@ -105,7 +108,7 @@ def get_all_playlist_tracks(playlist_id):
             if not results['next']:
                 break
             offset += limit
-            time.sleep(0.1)
+            # Removed time.sleep(0.1) as Spotipy handles retries/rate limits
         except Exception as e:
             logger.error(f"Error fetching playlist tracks: {e}")
             break
@@ -126,92 +129,31 @@ def get_liked_songs():
         offset += limit
     return liked_tracks
 
-def get_recent_tracks_from_playlists(playlist_ids):
+def update_recent_tracks_playlist(full_library, target_playlist_name):
+    """Update Recently Added playlist based on pre-fetched library"""
+    logger.info("\n" + "="*50)
+    logger.info("UPDATING RECENT TRACKS PLAYLIST")
+    logger.info("="*50)
+
+    # Library is now passed in
+
+    # 2. Filter for tracks added in last 30 days
     one_month_ago = datetime.now() - timedelta(days=30)
-    logger.info(f"Finding tracks added since {one_month_ago.date()}")
-    playlist_tracks = _get_recent_playlist_tracks(playlist_ids, one_month_ago)
-    liked_tracks = _get_recent_liked_tracks(one_month_ago)
-    all_tracks = playlist_tracks + liked_tracks
-    return _process_and_sort_tracks(all_tracks)
+    logger.info(f"Filtering for tracks added since {one_month_ago.date()}")
 
-def _get_recent_playlist_tracks(playlist_ids, cutoff_date):
-    recent_tracks = []
-    for playlist_id in playlist_ids:
-        try:
-            playlist = sp.playlist(playlist_id)
-            logger.info(f"Processing playlist: {playlist['name']}")
-            tracks = get_all_playlist_tracks(playlist_id)
-            recent_tracks.extend(_process_playlist_tracks(tracks, cutoff_date))
-        except Exception as e:
-            logger.error(f"Error processing playlist {playlist_id}: {e}")
-    return recent_tracks
-
-def _process_playlist_tracks(tracks, cutoff_date):
-    processed_tracks = []
-    for item in tracks:
-        try:
-            track_data = _extract_track_data(item, cutoff_date)
-            if track_data:
-                processed_tracks.append(track_data)
-        except Exception as e:
-            logger.error(f"Error processing track: {e}")
-    return processed_tracks
-
-def _extract_track_data(item, cutoff_date):
-    if not item or not item.get('track') or not item.get('added_at'):
-        logger.warning(f"Skipping invalid track item: {item}")
-        return None
-    added_at = datetime.strptime(item['added_at'], date_format)
-    if added_at <= cutoff_date:
-        return None
-    return {
-        'uri': item['track']['uri'],
-        'added_at': added_at,
-        'name': item['track'].get('name', 'Unknown'),
-        'artist': item['track']['artists'][0]['name'] if item['track'].get('artists') else 'Unknown'
-    }
-
-def _get_recent_liked_tracks(cutoff_date):
-    logger.info("Fetching tracks from Liked Songs")
-    liked_tracks = get_liked_songs()
-    return [
-        {'uri': item['track']['uri'], 'added_at': datetime.strptime(item['added_at'], date_format)}
-        for item in liked_tracks
-        if datetime.strptime(item['added_at'], date_format) > cutoff_date
+    recent_tracks = [
+        track for track in full_library.values()
+        if track['added_at'] and track['added_at'] > one_month_ago
     ]
 
-def _process_and_sort_tracks(tracks):
-    unique_tracks = {}
-    for track in tracks:
-        uri = track['uri']
-        if uri not in unique_tracks or track['added_at'] > unique_tracks[uri]['added_at']:
-            unique_tracks[uri] = track
-    return [track['uri'] for track in sorted(
-        unique_tracks.values(),
-        key=lambda x: x['added_at'],
-        reverse=True
-    )]
+    # 3. Sort by added_at descending
+    sorted_tracks = sorted(recent_tracks, key=lambda x: x['added_at'], reverse=True)
+    recent_uris = [track['uri'] for track in sorted_tracks]
 
-def update_recent_tracks_playlist(source_playlist_ids, target_playlist_name):
-    recent_tracks = get_recent_tracks_from_playlists(source_playlist_ids)
-    playlists = sp.current_user_playlists()['items']
-    target_playlist = next((p for p in playlists if p['name'] == target_playlist_name), None)
-    if target_playlist:
-        sp.playlist_replace_items(target_playlist['id'], [])
-    else:
-        user_id = sp.current_user()['id']
-        target_playlist = sp.user_playlist_create(user_id, target_playlist_name, public=True)
-    if recent_tracks:
-        batch_size = 100
-        for i in range(0, len(recent_tracks), batch_size):
-            batch = recent_tracks[i:i + batch_size]
-            sp.playlist_add_items(target_playlist['id'], batch)
-            logger.info(f"Added batch of {len(batch)} tracks")
-        logger.info(f"Updated {target_playlist_name} with {len(recent_tracks)} recent tracks")
-    else:
-        logger.info("No recent tracks found to add.")
+    # 4. Update the playlist
+    create_or_update_playlist(target_playlist_name, recent_uris)
 
-def _create_track_dict(track):
+def _create_track_dict(track, added_at=None):
     """Create a standardized track dictionary"""
     if not track or not track.get('uri'):
         return None
@@ -219,27 +161,55 @@ def _create_track_dict(track):
     artist = track['artists'][0]['name'] if track.get('artists') else 'Unknown'
     name = track.get('name', 'Unknown')
 
+    dt_added_at = None
+    if added_at:
+        if isinstance(added_at, str):
+            dt_added_at = datetime.strptime(added_at, date_format)
+        else:
+            dt_added_at = added_at
+
     return {
         'uri': track['uri'],
         'name': name,
         'artist': artist,
+        'added_at': dt_added_at,
         'key': f"{artist.lower()}|||{name.lower()}"
     }
 
+def _update_library_with_track_item(all_tracks, item):
+    """Update library map with a single track item, keeping the oldest added_at date"""
+    if not item or not item.get('track'):
+        return
+
+    track_dict = _create_track_dict(item['track'], item.get('added_at'))
+    if not track_dict:
+        return
+
+    uri = track_dict['uri']
+    new_date = track_dict['added_at']
+
+    with library_lock:
+        if uri not in all_tracks:
+            all_tracks[uri] = track_dict
+            return
+
+        # If it exists, check if the new date is older
+        existing_date = all_tracks[uri].get('added_at')
+        if new_date and (not existing_date or new_date < existing_date):
+            all_tracks[uri]['added_at'] = new_date
+
 def _add_liked_songs_to_library(all_tracks):
-    """Add liked songs to the track library"""
+    """Add liked songs to the track library, keeping the oldest added_at date"""
     logger.info("Fetching liked songs...")
     liked = get_liked_songs()
 
     for item in liked:
-        track_dict = _create_track_dict(item['track'])
-        if track_dict:
-            all_tracks[track_dict['uri']] = track_dict
+        _update_library_with_track_item(all_tracks, item)
 
-    logger.info(f"Found {len(all_tracks)} liked songs")
+    logger.info(f"Unique tracks after Liked Songs: {len(all_tracks)}")
 
 def _add_playlist_tracks_to_library(all_tracks, playlist_ids):
-    """Add playlist tracks to the track library"""
+    """Add playlist tracks to the track library, keeping the oldest added_at date"""
     for playlist_id in playlist_ids:
         try:
             playlist = sp.playlist(playlist_id)
@@ -247,22 +217,35 @@ def _add_playlist_tracks_to_library(all_tracks, playlist_ids):
             tracks = get_all_playlist_tracks(playlist_id)
 
             for item in tracks:
-                if item and item.get('track'):
-                    track_dict = _create_track_dict(item['track'])
-                    if track_dict and track_dict['uri'] not in all_tracks:
-                        all_tracks[track_dict['uri']] = track_dict
+                _update_library_with_track_item(all_tracks, item)
         except Exception as e:
             logger.error(f"Error processing playlist {playlist_id}: {e}")
 
 def get_all_spotify_library_tracks(playlist_ids):
-    """Get all unique tracks from Spotify library (liked songs + playlists)"""
+    """Get all unique tracks from Spotify library using parallel fetching"""
     logger.info("\n=== Building Spotify Library ===")
+    start_time = time.time()
 
     all_tracks = {}
-    _add_liked_songs_to_library(all_tracks)
-    _add_playlist_tracks_to_library(all_tracks, playlist_ids)
 
-    logger.info(f"\nTotal unique tracks in library: {len(all_tracks)}\n")
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit task for liked songs
+        future_to_type = {executor.submit(_add_liked_songs_to_library, all_tracks): "liked_songs"}
+
+        # Submit tasks for each playlist
+        for playlist_id in playlist_ids:
+            future_to_type[executor.submit(_add_playlist_tracks_to_library, all_tracks, [playlist_id])] = f"playlist_{playlist_id}"
+
+        for future in as_completed(future_to_type):
+            task_type = future_to_type[future]
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Task {task_type} generated an exception: {e}")
+
+    elapsed = time.time() - start_time
+    logger.info(f"\nTotal unique tracks in library: {len(all_tracks)}")
+    logger.info(f"Library build completed in {format_elapsed_time(elapsed)}\n")
     return all_tracks
 
 @retry_on_rate_limit()
@@ -368,13 +351,13 @@ def create_or_update_playlist(playlist_name, track_uris):
     else:
         logger.info(f"No tracks to add to '{playlist_name}'")
 
-def update_playcount_playlists(playlist_ids, top_playlist_name, bottom_playlist_name):
-    """Create/update both top 25 and bottom 25 playlists with a single library fetch"""
+def update_playcount_playlists(spotify_library, top_playlist_name, bottom_playlist_name):
+    """Create/update playlists using pre-fetched library"""
     logger.info("\n" + "="*50)
     logger.info("CREATING PLAYCOUNT-BASED PLAYLISTS")
     logger.info("="*50)
 
-    spotify_library = get_all_spotify_library_tracks(playlist_ids)
+    # Library is now passed in
     matched_tracks = match_spotify_with_lastfm(spotify_library)
 
     # Filter tracks with at least 1 play
@@ -436,17 +419,19 @@ if __name__ == "__main__":
     TOP_25_PLAYLIST_NAME = getenv('TOP_25_PLAYLIST_NAME', 'Top 25 Most Played')
     BOTTOM_25_PLAYLIST_NAME = getenv('BOTTOM_25_PLAYLIST_NAME', 'Top 25 Least Played')
 
-    # Update recent tracks playlist
-    logger.info("\n" + "="*50)
-    logger.info("UPDATING RECENT TRACKS PLAYLIST")
-    logger.info("="*50)
+    # 1. Fetch library once
+    lib_start = time.time()
+    full_library = get_all_spotify_library_tracks(SOURCE_PLAYLIST_IDS)
+
+    # 2. Update recent tracks playlist
     operation_start = time.time()
-    update_recent_tracks_playlist(SOURCE_PLAYLIST_IDS, TARGET_PLAYLIST_NAME)
+    update_recent_tracks_playlist(full_library, TARGET_PLAYLIST_NAME)
     operation_time = time.time() - operation_start
     logger.info(f"\nRecent tracks update completed in {format_elapsed_time(operation_time)}")
 
+    # 3. Update playcount playlists
     operation_start = time.time()
-    update_playcount_playlists(SOURCE_PLAYLIST_IDS, TOP_25_PLAYLIST_NAME, BOTTOM_25_PLAYLIST_NAME)
+    update_playcount_playlists(full_library, TOP_25_PLAYLIST_NAME, BOTTOM_25_PLAYLIST_NAME)
     operation_time = time.time() - operation_start
     logger.info(f"\nPlaycount update completed in {format_elapsed_time(operation_time)}")
 

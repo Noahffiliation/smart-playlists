@@ -25,39 +25,20 @@ def test_format_elapsed_time():
     assert smart_playlists.format_elapsed_time(65) == "1m 5s"
     assert smart_playlists.format_elapsed_time(3665) == "1h 1m 5s"
 
-def test_extract_track_data():
-    cutoff_date = datetime(2026, 1, 1)
-
-    # Valid track
-    item = {
-        'added_at': '2026-01-28T13:00:00Z',
-        'track': {
-            'uri': 'spotify:track:123',
-            'name': 'Test Track',
-            'artists': [{'name': 'Test Artist'}]
-        }
+def test_create_track_dict():
+    track = {
+        'uri': 'spotify:track:123',
+        'name': 'Test Track',
+        'artists': [{'name': 'Test Artist'}]
     }
-    result = smart_playlists._extract_track_data(item, cutoff_date)
+    added_at = '2026-01-28T13:00:00Z'
+    result = smart_playlists._create_track_dict(track, added_at)
     assert result['uri'] == 'spotify:track:123'
-    assert result['name'] == 'Test Track'
-    assert result['artist'] == 'Test Artist'
+    assert result['added_at'] == datetime(2026, 1, 28, 13, 0, 0)
+    assert result['key'] == 'test artist|||test track'
 
-    # Old track
-    item['added_at'] = '2025-12-31T13:00:00Z'
-    assert smart_playlists._extract_track_data(item, cutoff_date) is None
-
-    # Invalid track
-    assert smart_playlists._extract_track_data(None, cutoff_date) is None
-    assert smart_playlists._extract_track_data({}, cutoff_date) is None
-
-def test_process_and_sort_tracks():
-    tracks = [
-        {'uri': 'track1', 'added_at': datetime(2026, 1, 10)},
-        {'uri': 'track2', 'added_at': datetime(2026, 1, 20)},
-        {'uri': 'track1', 'added_at': datetime(2026, 1, 15)}, # Newer version of track1
-    ]
-    result = smart_playlists._process_and_sort_tracks(tracks)
-    assert result == ['track2', 'track1']
+    assert smart_playlists._create_track_dict(None) is None
+    assert smart_playlists._create_track_dict({}) is None
 
 def test_get_all_playlist_tracks(mock_spotify):
     mock_spotify.playlist_tracks.side_effect = [
@@ -92,18 +73,7 @@ def test_get_lastfm_track_playcount(mock_lastfm):
     mock_lastfm.get_track.side_effect = Exception("Error")
     assert smart_playlists.get_lastfm_track_playcount('Artist', 'Track') == 0
 
-def test_create_track_dict():
-    track = {
-        'uri': 'spotify:track:123',
-        'name': 'Test Track',
-        'artists': [{'name': 'Test Artist'}]
-    }
-    result = smart_playlists._create_track_dict(track)
-    assert result['uri'] == 'spotify:track:123'
-    assert result['key'] == 'test artist|||test track'
 
-    assert smart_playlists._create_track_dict(None) is None
-    assert smart_playlists._create_track_dict({}) is None
 
 def test_add_liked_songs_to_library(mock_spotify):
     mock_spotify.current_user_saved_tracks.side_effect = [
@@ -116,29 +86,20 @@ def test_add_liked_songs_to_library(mock_spotify):
     assert all_tracks['1']['name'] == 'N1'
 
 def test_update_recent_tracks_playlist(mock_spotify):
-    # Mock get_recent_tracks_from_playlists
-    with patch('smart_playlists.get_recent_tracks_from_playlists') as mock_get_recent:
-        mock_get_recent.return_value = ['track1', 'track2']
+    with patch('smart_playlists.get_all_spotify_library_tracks') as mock_library, \
+         patch('smart_playlists.create_or_update_playlist') as mock_create_update:
 
-        # Mocking playlist discovery
-        mock_spotify.current_user_playlists.return_value = {'items': [{'name': 'Target', 'id': 'target_id'}]}
+        now = datetime.now()
+        mock_library.return_value = {
+            't1': {'uri': 't1', 'added_at': now - timedelta(days=5)},
+            't2': {'uri': 't2', 'added_at': now - timedelta(days=40)}, # Old
+            't3': {'uri': 't3', 'added_at': now - timedelta(days=2)}
+        }
 
-        smart_playlists.update_recent_tracks_playlist(['source'], 'Target')
+        smart_playlists.update_recent_tracks_playlist(mock_library.return_value, 'Target')
 
-        mock_spotify.playlist_replace_items.assert_called_with('target_id', [])
-        mock_spotify.playlist_add_items.assert_called_with('target_id', ['track1', 'track2'])
-
-def test_update_recent_tracks_playlist_create_new(mock_spotify):
-    with patch('smart_playlists.get_recent_tracks_from_playlists') as mock_get_recent:
-        mock_get_recent.return_value = ['track1']
-        mock_spotify.current_user_playlists.return_value = {'items': []}
-        mock_spotify.current_user.return_value = {'id': 'user_id'}
-        mock_spotify.user_playlist_create.return_value = {'id': 'new_id'}
-
-        smart_playlists.update_recent_tracks_playlist(['source'], 'New')
-
-        mock_spotify.user_playlist_create.assert_called()
-        mock_spotify.playlist_add_items.assert_called_with('new_id', ['track1'])
+        # Should only include t3 and t1, sorted t3 then t1
+        mock_create_update.assert_called_with('Target', ['t3', 't1'])
 
 def test_match_spotify_with_lastfm(mock_lastfm):
     spotify_tracks = {
@@ -254,24 +215,10 @@ def test_update_playcount_playlists(mock_spotify):
             {'uri': 't2', 'artist': 'A2', 'name': 'N2', 'playcount': 10}
         ]
 
-        smart_playlists.update_playcount_playlists(['s1'], 'Top', 'Bottom')
+        smart_playlists.update_playcount_playlists(mock_library.return_value, 'Top', 'Bottom')
         assert mock_create_update.call_count == 2
 
-def test_get_recent_playlist_tracks(mock_spotify):
-    mock_spotify.playlist.return_value = {'name': 'P1'}
-    with patch('smart_playlists.get_all_playlist_tracks') as mock_tracks, \
-         patch('smart_playlists._process_playlist_tracks') as mock_process:
-        mock_tracks.return_value = []
-        mock_process.return_value = [{'uri': 't1'}]
 
-        result = smart_playlists._get_recent_playlist_tracks(['id'], datetime.now())
-        assert result == [{'uri': 't1'}]
-
-def test_process_playlist_tracks(mock_spotify):
-    with patch('smart_playlists._extract_track_data') as mock_extract:
-        mock_extract.side_effect = [{'uri': 't1'}, None, {'uri': 't2'}]
-        result = smart_playlists._process_playlist_tracks([1, 2, 3], datetime.now())
-        assert len(result) == 2
 
 def test_get_all_spotify_library_tracks(mock_spotify):
     with patch('smart_playlists._add_liked_songs_to_library') as mock_liked, \
