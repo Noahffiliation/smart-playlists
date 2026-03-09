@@ -13,6 +13,7 @@ jobs:
     env:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       SPOTIPY_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      SPOTIPY_CLIENT_SECRET: ${{ secrets.SPOTIPY_CLIENT_SECRET }}
       CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
       REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
       LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
