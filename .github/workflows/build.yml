@@ -13,6 +13,7 @@ jobs:
       CLIENT_ID: ${{ secrets.CLIENT_ID }}
       CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
       REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
+      SPOTIPY_CLIENT_ID: ${{ secrets.CLIENT_ID }}
       LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
       LASTFM_USERNAME: ${{ secrets.LASTFM_USERNAME }}
     steps:
