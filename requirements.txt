@@ -10,7 +10,7 @@ httpcore==1.0.9
 httpx==0.28.1
 idna==3.11
 iniconfig==2.3.0
-packaging==26.0
+packaging==26.1
 pluggy==1.6.0
 pylast==7.0.2
 pytest==9.0.3
