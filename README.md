@@ -13,6 +13,8 @@ As a heavy Spotify user, I wanted to replicate iTunes' Smart Playlists feature i
 
 I also added a script to get new releases from artists I follow to a playlist, since Spotify's What's New feed sometimes delays showing new releases by a few days to a week.
 
+There's also a script to find tracks that are in my Spotify library but not scrobbled at all on last.fm and add them to a playlist. The Top 25 playlists only work if everything in my library has scrobbles. I started scrobbling on last.fm in February of 2021, and my Spotify library was also quite large at that time, so there were plenty of tracks that I hadn't scrobbled yet. This script is probaly just a one-off, but will keep around in case scrobbles get missed for whatever reason.
+
 ### Note <a name = "note"></a>
 This was more-or-less completely [vibe-coded](https://en.wikipedia.org/wiki/Vibe_coding) with [DeepSeek](https://chat.deepseek.com/) when it first became publically available and later edited and expanded with [Claude](https://claude.ai/). I wanted to try out the newest AI chatbot and also try out actual vibe coding and see how it goes for an inconsequential project. Generally, I'm pleasantly surprised with how well this turned out, functions just as intended.
 
@@ -52,7 +54,7 @@ A good default for `REDIRECT_URI` is `http://127.0.0.1:8888/callback`, make sure
 ## Usage <a name="usage"></a>
 Once you fill out your `.env`, you can run either Python file to test it out
 
-Use either a cronjob or Windows Task Scheduler to run the script periodically
+Use either a cronjob or Windows Task Scheduler to run the scripts periodically
 
 ## Built Using <a name = "built_using"></a>
 - [Python](https://www.python.org/)
