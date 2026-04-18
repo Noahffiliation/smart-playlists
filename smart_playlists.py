@@ -12,6 +12,7 @@ from collections import defaultdict
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import re
 
 load_dotenv()
 
@@ -252,7 +253,8 @@ def get_all_spotify_library_tracks(playlist_ids):
 def get_lastfm_track_playcount(artist, track):
     """Get playcount for a specific track from Last.fm"""
     try:
-        lastfm_track = network.get_track(artist, track)
+        clean_name = clean_track_name(track)
+        lastfm_track = network.get_track(artist, clean_name)
         playcount = lastfm_track.get_userplaycount()
         return playcount if playcount else 0
     except Exception:
@@ -291,6 +293,16 @@ def get_all_lastfm_playcounts():
     logger.info(f"Successfully cached {len(playcounts)} tracks from Last.fm")
     return playcounts
 
+def clean_track_name(name):
+    """Clean track name to improve Last.fm matching"""
+    # Remove anything after and including " - "
+    name = name.split(' - ', 1)[0]
+    # Remove anything in parenthesis mapping to typical features
+    name = re.sub(r'\s{0,2}\([^)]*\)', '', name)
+    # Remove anything in brackets
+    name = re.sub(r'\s{0,2}\[[^\]]*\]', '', name)
+    return name.strip()
+
 def match_spotify_with_lastfm(spotify_tracks):
     """Match Spotify tracks with Last.fm playcounts using bulk-fetched data"""
     logger.info("=== Matching Spotify tracks with Last.fm scrobbles ===")
@@ -308,6 +320,13 @@ def match_spotify_with_lastfm(spotify_tracks):
         key = f"{artist}|||{name}"
 
         playcount = lastfm_library.get(key)
+
+        # 2. Try cleaned match if exact match failed
+        if playcount is None:
+            clean_name = clean_track_name(name)
+            if clean_name != name:
+                clean_key = f"{artist}|||{clean_name}"
+                playcount = lastfm_library.get(clean_key)
 
         if playcount is None:
             # If not in top tracks, it might have 0 plays or be hard to match

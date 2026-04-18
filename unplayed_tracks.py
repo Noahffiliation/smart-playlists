@@ -8,7 +8,8 @@ from smart_playlists import (
     match_spotify_with_lastfm,
     create_or_update_playlist,
     logger,
-    format_elapsed_time
+    format_elapsed_time,
+    get_lastfm_track_playcount
 )
 
 load_dotenv()
@@ -24,10 +25,22 @@ def generate_unplayed_playlist(spotify_library, unplayed_playlist_name):
     # Filter tracks with 0 plays
     unplayed_tracks = [t for t in matched_tracks if t['playcount'] == 0]
 
-    logger.info(f"\nFound {len(unplayed_tracks)} tracks with 0 playcount.")
+    logger.info(f"\nFound {len(unplayed_tracks)} tracks with 0 playcount in cache. Verifying with API...")
+
+    verified_unplayed = []
+    for i, t in enumerate(unplayed_tracks, 1):
+        if i % 10 == 0:
+            logger.info(f"Verified {i}/{len(unplayed_tracks)} tracks...")
+        pc = get_lastfm_track_playcount(t['artist'], t['name'])
+        if pc == 0:
+            verified_unplayed.append(t)
+        else:
+            logger.info(f"  -> False positive: {t['artist']} - {t['name']} has {pc} plays")
+
+    logger.info(f"\nFinal count: {len(verified_unplayed)} tracks with verified 0 playcount.")
 
     # A Spotify playlist can hold a lot of tracks, we'll add them all
-    unplayed_track_uris = [t['uri'] for t in unplayed_tracks]
+    unplayed_track_uris = [t['uri'] for t in verified_unplayed]
 
     create_or_update_playlist(unplayed_playlist_name, unplayed_track_uris)
 
@@ -49,10 +62,10 @@ def main():
     operation_start = time.time()
     generate_unplayed_playlist(full_library, UNPLAYED_PLAYLIST_NAME)
     operation_time = time.time() - operation_start
-    logger.info(f"\\nUnplayed tracks playlist update completed in {format_elapsed_time(operation_time)}")
+    logger.info(f"\nUnplayed tracks playlist update completed in {format_elapsed_time(operation_time)}")
 
     total_runtime = time.time() - script_start
-    logger.info("\\n" + "="*50)
+    logger.info("\n" + "="*50)
     logger.info(f"Script completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Total runtime: {format_elapsed_time(total_runtime)}")
     logger.info("="*50)
