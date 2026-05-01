@@ -1,3 +1,5 @@
+import sys
+from zoneinfo import ZoneInfo
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta
@@ -177,6 +179,20 @@ def create_or_get_playlist(sp, playlist_name, logger):
     )
     return playlist['id']
 
+def is_target_execution_time(target_hour=23):
+    """
+    Checks if the current time in Central Time matches the target hour.
+    """
+    central_timezone = ZoneInfo("America/Chicago")
+    current_local_time = datetime.now(central_timezone)
+
+    if current_local_time.hour != target_hour:
+        print(f"Early exit: It is currently {current_local_time.strftime('%I:%M %p')} local time.")
+        print(f"Waiting for the correct hour ({target_hour}:00).")
+        return False
+
+    return True
+
 def main():
     logger = setup_logging()
     logger.info("=" * 60)
@@ -264,4 +280,7 @@ def main():
         raise
 
 if __name__ == "__main__":
+    if not is_target_execution_time(target_hour=23):
+        sys.exit(0)
+
     main()

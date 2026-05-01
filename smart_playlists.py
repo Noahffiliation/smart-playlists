@@ -1,3 +1,4 @@
+import sys
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from collections import defaultdict
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 
@@ -410,7 +412,26 @@ def format_elapsed_time(seconds):
     parts.append(f"{int(seconds)}s")
     return " ".join(parts)
 
+def is_target_execution_time(target_hour=0):
+    """
+    Checks if the current time in Central Time matches the target hour.
+    0 = Midnight, 23 = 11:00 PM.
+    """
+    # America/Chicago handles both CST and CDT automatically
+    central_timezone = ZoneInfo("America/Chicago")
+    current_local_time = datetime.now(central_timezone)
+
+    if current_local_time.hour != target_hour:
+        print(f"Early exit: It is currently {current_local_time.strftime('%I:%M %p')} local time.")
+        print(f"Waiting for the correct hour ({target_hour}:00).")
+        return False
+
+    return True
+
 if __name__ == "__main__":
+    if not is_target_execution_time(target_hour=0):
+        sys.exit(0)
+
     script_start = time.time()
     logger.info(f"Script started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 

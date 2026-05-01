@@ -1,0 +1,55 @@
+name: Spotify Playlist Sync
+
+on:
+  schedule:
+    - cron: '0 5,6 * * *'
+  workflow_dispatch: # Allows you to run it manually from the GitHub app/site
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then pip install --only-binary :all: --require-hashes -r requirements.txt; fi
+
+      - name: Restore Spotify Cache
+        run: |
+          echo "${{ secrets.SPOTIFY_CACHE_B64 }}" | base64 --decode > .cache
+
+      - name: Execute Script
+        env:
+          # Spotify Auth
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
+
+          # Last.fm Auth
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_USERNAME: ${{ secrets.LASTFM_USERNAME }}
+
+          # Playlist Configurations
+          SOURCE_PLAYLIST_IDS: ${{ secrets.SOURCE_PLAYLIST_IDS }}
+          TARGET_PLAYLIST_NAME: ${{ secrets.TARGET_PLAYLIST_NAME }}
+          TOP_25_PLAYLIST_NAME: ${{ secrets.TOP_25_PLAYLIST_NAME }}
+          BOTTOM_25_PLAYLIST_NAME: ${{ secrets.BOTTOM_25_PLAYLIST_NAME }}
+
+        run: python smart_playlists.py
+
+      - name: Upload Execution Logs
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: spotify-sync-logs
+          # Adjust the path below if your logger saves to a specific folder
+          path: logs/*.log
+          retention-days: 7
