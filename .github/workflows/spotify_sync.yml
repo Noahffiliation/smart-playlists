@@ -24,7 +24,7 @@ jobs:
 
       - name: Restore Spotify Cache
         run: |
-          echo "${{ secrets.SPOTIFY_CACHE_B64 }}" | base64 --decode > .cache
+          echo "${{ secrets.SPOTIFY_CACHE_B64 }}" | tr -d '\n\r ' | base64 --decode > .cache
 
       - name: Execute Script
         env:

@@ -1,3 +1,4 @@
+import os
 import sys
 from zoneinfo import ZoneInfo
 import spotipy
@@ -183,6 +184,10 @@ def is_target_execution_time(target_hour=23):
     """
     Checks if the current time in Central Time matches the target hour.
     """
+    if os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
+        print("Manual execution detected. Bypassing DST time check.")
+        return True
+
     central_timezone = ZoneInfo("America/Chicago")
     current_local_time = datetime.now(central_timezone)
 

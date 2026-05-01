@@ -1,3 +1,4 @@
+import os
 import sys
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -417,6 +418,10 @@ def is_target_execution_time(target_hour=0):
     Checks if the current time in Central Time matches the target hour.
     0 = Midnight, 23 = 11:00 PM.
     """
+    if os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
+        print("Manual execution detected. Bypassing DST time check.")
+        return True
+
     # America/Chicago handles both CST and CDT automatically
     central_timezone = ZoneInfo("America/Chicago")
     current_local_time = datetime.now(central_timezone)
