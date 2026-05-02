@@ -2,7 +2,8 @@ name: Spotify Playlist Sync
 
 on:
   schedule:
-    - cron: '0 5,6 * * *'
+    - cron: '0 0 * * *'
+      timezone: 'America/Chicago'
   workflow_dispatch: # Allows you to run it manually from the GitHub app/site
 
 jobs:
