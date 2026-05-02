@@ -2,7 +2,8 @@ name: Spotify New Releases
 
 on:
   schedule:
-    - cron: '1 4,5 * * *'
+    - cron: '1 23 * * *'
+      timezone: 'America/Chicago'
   workflow_dispatch: # Allows you to run it manually from the GitHub app/site
 
 jobs:
