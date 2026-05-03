@@ -1,6 +1,3 @@
-import os
-import sys
-from zoneinfo import ZoneInfo
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta
@@ -18,9 +15,6 @@ SPOTIPY_REDIRECT_URI = getenv('REDIRECT_URI')
 
 # Comma-separated playlist IDs to check (in addition to liked songs)
 SOURCE_PLAYLIST_IDS = getenv('SOURCE_PLAYLIST_IDS', '')
-
-# Scopes needed for the script
-SCOPE = 'user-follow-read user-library-read playlist-modify-public playlist-modify-private'
 
 def setup_logging():
     """Set up logging to file and console"""
@@ -49,7 +43,7 @@ def get_spotify_client():
         client_id=SPOTIPY_CLIENT_ID,
         client_secret=SPOTIPY_CLIENT_SECRET,
         redirect_uri=SPOTIPY_REDIRECT_URI,
-        scope=SCOPE
+        scope='user-follow-read user-library-read playlist-modify-public playlist-modify-private'
     ))
 
 def get_followed_artists(sp, logger):
@@ -180,24 +174,6 @@ def create_or_get_playlist(sp, playlist_name, logger):
     )
     return playlist['id']
 
-def is_target_execution_time(target_hour=23):
-    """
-    Checks if the current time in Central Time matches the target hour.
-    """
-    if os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
-        print("Manual execution detected. Bypassing DST time check.")
-        return True
-
-    central_timezone = ZoneInfo("America/Chicago")
-    current_local_time = datetime.now(central_timezone)
-
-    if current_local_time.hour != target_hour:
-        print(f"Early exit: It is currently {current_local_time.strftime('%I:%M %p')} local time.")
-        print(f"Waiting for the correct hour ({target_hour}:00).")
-        return False
-
-    return True
-
 def main():
     logger = setup_logging()
     logger.info("=" * 60)
@@ -285,7 +261,4 @@ def main():
         raise
 
 if __name__ == "__main__":
-    if not is_target_execution_time(target_hour=23):
-        sys.exit(0)
-
     main()

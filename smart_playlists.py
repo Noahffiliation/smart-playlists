@@ -1,5 +1,3 @@
-import os
-import sys
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime, timedelta
@@ -14,7 +12,6 @@ from collections import defaultdict
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-from zoneinfo import ZoneInfo
 
 load_dotenv()
 
@@ -28,7 +25,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
     redirect_uri=REDIRECT_URI,
-    scope='playlist-modify-public playlist-read-private user-library-read'
+    scope='user-follow-read user-library-read playlist-modify-public playlist-modify-private'
 ))
 
 network = pylast.LastFMNetwork(
@@ -413,30 +410,7 @@ def format_elapsed_time(seconds):
     parts.append(f"{int(seconds)}s")
     return " ".join(parts)
 
-def is_target_execution_time(target_hour=0):
-    """
-    Checks if the current time in Central Time matches the target hour.
-    0 = Midnight, 23 = 11:00 PM.
-    """
-    if os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
-        print("Manual execution detected. Bypassing DST time check.")
-        return True
-
-    # America/Chicago handles both CST and CDT automatically
-    central_timezone = ZoneInfo("America/Chicago")
-    current_local_time = datetime.now(central_timezone)
-
-    if current_local_time.hour != target_hour:
-        print(f"Early exit: It is currently {current_local_time.strftime('%I:%M %p')} local time.")
-        print(f"Waiting for the correct hour ({target_hour}:00).")
-        return False
-
-    return True
-
 if __name__ == "__main__":
-    if not is_target_execution_time(target_hour=0):
-        sys.exit(0)
-
     script_start = time.time()
     logger.info(f"Script started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
