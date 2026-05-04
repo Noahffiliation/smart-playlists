@@ -184,9 +184,10 @@ def main():
         logger.info("Initializing Spotify client...")
         sp = get_spotify_client()
 
-        # Get date from 24 hours ago
-        one_day_ago = datetime.now() - timedelta(hours=24)
-        logger.info(f"Looking for releases since: {one_day_ago.strftime('%Y-%m-%d %H:%M:%S')}")
+        now = datetime.now()
+        yesterday = now - timedelta(days=2)
+        since_date = yesterday.replace(hour=23, minute=0, second=0, microsecond=0)
+        logger.info(f"Looking for releases since: {since_date.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Get followed artists
         artists = get_followed_artists(sp, logger)
@@ -216,7 +217,7 @@ def main():
         for i, artist in enumerate(artists, 1):
             logger.info(f"[{i}/{len(artists)}] Checking {artist['name']}...")
 
-            new_releases = get_artist_new_releases(sp, artist['id'], one_day_ago)
+            new_releases = get_artist_new_releases(sp, artist['id'], since_date)
 
             for album in new_releases:
                 # Skip if we've already processed this album
