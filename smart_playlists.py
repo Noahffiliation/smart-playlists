@@ -88,10 +88,10 @@ def retry_on_rate_limit(max_retries=3, initial_delay=1):
                         logger.warning(f"Last.fm rate limit exceeded. Retrying in {wait_time}s...")
                         time.sleep(wait_time)
                     else:
-                        logger.error(f"Last.fm API error: {e}")
+                        logger.exception(f"Last.fm API error: {e}")
                         raise
                 except Exception as e:
-                    logger.error(f"Last.fm API error: {e}")
+                    logger.exception(f"Last.fm API error: {e}")
                     raise
             return None
         return wrapper
@@ -110,7 +110,7 @@ def get_all_playlist_tracks(playlist_id):
             offset += limit
             # Removed time.sleep(0.1) as Spotipy handles retries/rate limits
         except Exception as e:
-            logger.error(f"Error fetching playlist tracks: {e}")
+            logger.exception(f"Error fetching playlist tracks: {e}")
             break
     return tracks
 
@@ -219,7 +219,7 @@ def _add_playlist_tracks_to_library(all_tracks, playlist_ids):
             for item in tracks:
                 _update_library_with_track_item(all_tracks, item)
         except Exception as e:
-            logger.error(f"Error processing playlist {playlist_id}: {e}")
+            logger.exception(f"Error processing playlist {playlist_id}: {e}")
 
 def get_all_spotify_library_tracks(playlist_ids):
     """Get all unique tracks from Spotify library using parallel fetching"""
@@ -241,7 +241,7 @@ def get_all_spotify_library_tracks(playlist_ids):
             try:
                 future.result()
             except Exception as e:
-                logger.error(f"Task {task_type} generated an exception: {e}")
+                logger.exception(f"Task {task_type} generated an exception: {e}")
 
     elapsed = time.time() - start_time
     logger.info(f"\nTotal unique tracks in library: {len(all_tracks)}")
@@ -284,9 +284,9 @@ def get_all_lastfm_playcounts():
         if str(e.status) == "29":  # Rate limit exceeded
             logger.warning("Rate limit hit during bulk fetch.")
         else:
-            logger.error(f"Error during bulk fetch: {e}")
+            logger.exception(f"Error during bulk fetch: {e}")
     except Exception as e:
-        logger.error(f"Error during bulk fetch: {e}")
+        logger.exception(f"Error during bulk fetch: {e}")
 
     logger.info(f"Successfully cached {len(playcounts)} tracks from Last.fm")
     return playcounts
