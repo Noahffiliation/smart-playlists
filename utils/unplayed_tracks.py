@@ -1,7 +1,16 @@
+import sys
+from pathlib import Path
+
+# Add project root directory to sys.path so smart_playlists can be imported
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import time
 from datetime import datetime
 from os import getenv
 from dotenv import load_dotenv
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from smart_playlists import (
     get_all_spotify_library_tracks,
@@ -28,14 +37,24 @@ def generate_unplayed_playlist(spotify_library, unplayed_playlist_name):
     logger.info(f"\nFound {len(unplayed_tracks)} tracks with 0 playcount in cache. Verifying with API...")
 
     verified_unplayed = []
-    for i, t in enumerate(unplayed_tracks, 1):
-        if i % 10 == 0:
-            logger.info(f"Verified {i}/{len(unplayed_tracks)} tracks...")
-        pc = get_lastfm_track_playcount(t['artist'], t['name'])
+    lock = threading.Lock()
+
+    def verify_track(track_info):
+        pc = get_lastfm_track_playcount(track_info['artist'], track_info['name'])
         if pc == 0:
-            verified_unplayed.append(t)
+            with lock:
+                verified_unplayed.append(track_info)
         else:
-            logger.info(f"  -> False positive: {t['artist']} - {t['name']} has {pc} plays")
+            logger.info(f"  -> False positive: {track_info['artist']} - {track_info['name']} has {pc} plays")
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(verify_track, t) for t in unplayed_tracks]
+        completed = 0
+        for f in as_completed(futures):
+            completed += 1
+            if completed % 10 == 0 or completed == len(unplayed_tracks):
+                logger.info(f"Verified {completed}/{len(unplayed_tracks)} tracks...")
+            f.result()
 
     logger.info(f"\nFinal count: {len(verified_unplayed)} tracks with verified 0 playcount.")
 

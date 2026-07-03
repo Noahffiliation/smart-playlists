@@ -21,12 +21,15 @@ REDIRECT_URI = getenv('REDIRECT_URI')
 LASTFM_API_KEY = getenv('LASTFM_API_KEY')
 LASTFM_USERNAME = getenv('LASTFM_USERNAME')
 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-    client_id=CLIENT_ID,
-    client_secret=CLIENT_SECRET,
-    redirect_uri=REDIRECT_URI,
-    scope='user-follow-read user-library-read playlist-modify-public playlist-modify-private'
-))
+sp = spotipy.Spotify(
+    auth_manager=SpotifyOAuth(
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        redirect_uri=REDIRECT_URI,
+        scope='user-follow-read user-library-read playlist-modify-public playlist-modify-private'
+    ),
+    requests_timeout=15
+)
 
 network = pylast.LastFMNetwork(
     api_key=LASTFM_API_KEY,
@@ -127,6 +130,8 @@ def get_liked_songs():
             'added_at': item['added_at']
         } for item in results['items']])
         offset += limit
+        if len(liked_tracks) > 0 and len(liked_tracks) % 500 == 0:
+            logger.info(f"Fetched {len(liked_tracks)} liked songs...")
     return liked_tracks
 
 def update_recent_tracks_playlist(full_library, target_playlist_name):
@@ -225,6 +230,13 @@ def get_all_spotify_library_tracks(playlist_ids):
     """Get all unique tracks from Spotify library using parallel fetching"""
     logger.info("\n=== Building Spotify Library ===")
     start_time = time.time()
+
+    # Pre-validate/refresh auth token before spinning up worker threads
+    try:
+        if sp.auth_manager:
+            sp.auth_manager.get_access_token(as_dict=False)
+    except Exception as e:
+        logger.warning(f"Could not pre-refresh Spotify auth token: {e}")
 
     all_tracks = {}
 
