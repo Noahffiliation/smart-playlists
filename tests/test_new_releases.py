@@ -59,6 +59,29 @@ def test_get_artist_new_releases_date_formats(mock_sp):
     releases = new_releases.get_artist_new_releases(mock_sp, 'artist_id', since_date)
     assert len(releases) == 2
 
+def test_parse_release_date():
+    assert new_releases.parse_release_date('2026') == datetime(2026, 1, 1)
+    assert new_releases.parse_release_date('2026-05') == datetime(2026, 5, 1)
+    assert new_releases.parse_release_date('2026-05-15') == datetime(2026, 5, 15)
+    assert new_releases.parse_release_date('') is None
+    assert new_releases.parse_release_date('invalid-date') is None
+
+def test_get_artist_new_releases_pagination(mock_sp):
+    mock_sp.artist_albums.return_value = {
+        'items': [{'name': 'Page 1 Album', 'release_date': '2026-01-27', 'id': 'a1'}],
+        'next': 'url_to_page_2'
+    }
+    mock_sp.next.return_value = {
+        'items': [{'name': 'Page 2 Single', 'release_date': '2026-01-25', 'id': 'a2'}],
+        'next': None
+    }
+    since_date = datetime(2026, 1, 20)
+
+    releases = new_releases.get_artist_new_releases(mock_sp, 'artist_id', since_date)
+    assert len(releases) == 2
+    assert releases[0]['name'] == 'Page 1 Album'
+    assert releases[1]['name'] == 'Page 2 Single'
+
 def test_get_saved_tracks(mock_sp, mock_logger):
     mock_sp.current_user_saved_tracks.return_value = {
         'items': [{'track': {'id': 't1'}}],

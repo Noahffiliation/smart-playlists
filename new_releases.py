@@ -60,23 +60,38 @@ def get_followed_artists(sp, logger):
     logger.info(f"Found {len(artists)} followed artists")
     return artists
 
-def get_artist_new_releases(sp, artist_id, since_date):
+def parse_release_date(release_date):
+    """Parse Spotify release date string (YYYY, YYYY-MM, YYYY-MM-DD) into datetime object."""
+    if not release_date:
+        return None
+    if len(release_date) == 4:
+        release_date += '-01-01'
+    elif len(release_date) == 7:
+        release_date += '-01'
+    try:
+        return datetime.strptime(release_date, '%Y-%m-%d')
+    except ValueError:
+        return None
+
+def get_artist_new_releases(sp, artist_id, since_date, album_type='album,single,appears_on,compilation'):
     """Get albums/singles released by artist since given date"""
     new_releases = []
-    results = sp.artist_albums(artist_id, album_type='album,single', limit=50)
+    seen_album_ids = set()
 
-    for album in results['items']:
-        release_date = album['release_date']
-        # Handle different date formats (YYYY, YYYY-MM, YYYY-MM-DD)
-        if len(release_date) == 4:  # Year only
-            release_date += '-01-01'
-        elif len(release_date) == 7:  # Year-Month
-            release_date += '-01'
+    results = sp.artist_albums(artist_id, album_type=album_type, limit=50)
 
-        release_datetime = datetime.strptime(release_date, '%Y-%m-%d')
+    while results:
+        for album in results.get('items', []):
+            album_id = album.get('id')
+            if not album_id or album_id in seen_album_ids:
+                continue
 
-        if release_datetime >= since_date:
-            new_releases.append(album)
+            release_datetime = parse_release_date(album.get('release_date', ''))
+            if release_datetime and release_datetime >= since_date:
+                seen_album_ids.add(album_id)
+                new_releases.append(album)
+
+        results = sp.next(results) if results.get('next') else None
 
     return new_releases
 
@@ -185,9 +200,10 @@ def main():
         sp = get_spotify_client()
 
         now = datetime.now()
-        yesterday = now - timedelta(days=2)
-        since_date = yesterday.replace(hour=23, minute=0, second=0, microsecond=0)
-        logger.info(f"Looking for releases since: {since_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        lookback_days = int(getenv('LOOKBACK_DAYS', '2'))
+        yesterday = now - timedelta(days=lookback_days)
+        since_date = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        logger.info(f"Looking for releases since: {since_date.strftime('%Y-%m-%d %H:%M:%S')} ({lookback_days} days lookback)")
 
         # Get followed artists
         artists = get_followed_artists(sp, logger)
