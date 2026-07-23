@@ -73,7 +73,7 @@ def parse_release_date(release_date):
     except ValueError:
         return None
 
-def get_artist_new_releases(sp, artist_id, since_date, album_type='album,single,appears_on,compilation'):
+def get_artist_new_releases(sp, artist_id, since_date, album_type='album,single'):
     """Get albums/singles released by artist since given date"""
     new_releases = []
     seen_album_ids = set()
