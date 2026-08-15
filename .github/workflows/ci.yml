@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Code & Syntax Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Verify Python syntax
+        run: |
+          python -m compileall -q smart_playlists.py new_releases.py utils tests
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13']
+    env:
+      CLIENT_ID: ${{ secrets.CLIENT_ID || 'dummy_client_id' }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET || 'dummy_client_secret' }}
+      REDIRECT_URI: ${{ secrets.REDIRECT_URI || 'http://localhost:8888/callback' }}
+      SPOTIPY_CLIENT_ID: ${{ secrets.CLIENT_ID || 'dummy_client_id' }}
+      SPOTIPY_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET || 'dummy_client_secret' }}
+      SPOTIPY_REDIRECT_URI: ${{ secrets.REDIRECT_URI || 'http://localhost:8888/callback' }}
+      LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY || 'dummy_api_key' }}
+      LASTFM_USERNAME: ${{ secrets.LASTFM_USERNAME || 'dummy_username' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then pip install --only-binary :all: --require-hashes -r requirements.txt; fi
+
+      - name: Run tests with coverage and threshold
+        run: |
+          pytest --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=80 tests/
+
+      - name: Upload coverage report
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  sonarqube:
+    name: SonarQube Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # Shallow clones disabled for accurate analysis
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v7
+        with:
+          name: coverage-report
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

@@ -4,46 +4,63 @@ on:
   schedule:
     - cron: '0 0 * * *'
       timezone: 'America/Chicago'
-  workflow_dispatch: # Allows you to run it manually from the GitHub app/site
+  workflow_dispatch:
+
+concurrency:
+  group: spotify-playlist-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   run-sync:
+    name: Sync Spotify Playlists
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
-          python-version: '3.10'
+          python-version: '3.13'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then pip install --only-binary :all: --require-hashes -r requirements.txt; fi
 
-      - name: Restore Spotify Cache
+      - name: Validate secrets
+        env:
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          SPOTIFY_CACHE_B64: ${{ secrets.SPOTIFY_CACHE_B64 }}
         run: |
-          echo "${{ secrets.SPOTIFY_CACHE_B64 }}" | tr -d '\n\r ' | base64 --decode > .cache
+          if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ] || [ -z "$SPOTIFY_CACHE_B64" ]; then
+            echo "Error: Required Spotify credentials or cache secret are missing." >&2
+            exit 1
+          fi
+
+      - name: Restore Spotify Cache
+        env:
+          SPOTIFY_CACHE_B64: ${{ secrets.SPOTIFY_CACHE_B64 }}
+        run: |
+          echo "$SPOTIFY_CACHE_B64" | tr -d '\n\r ' | base64 --decode > .cache
 
       - name: Execute Script
         env:
-          # Spotify Auth
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
-
-          # Last.fm Auth
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_USERNAME: ${{ secrets.LASTFM_USERNAME }}
-
-          # Playlist Configurations
           SOURCE_PLAYLIST_IDS: ${{ secrets.SOURCE_PLAYLIST_IDS }}
           TARGET_PLAYLIST_NAME: ${{ secrets.TARGET_PLAYLIST_NAME }}
           TOP_25_PLAYLIST_NAME: ${{ secrets.TOP_25_PLAYLIST_NAME }}
           BOTTOM_25_PLAYLIST_NAME: ${{ secrets.BOTTOM_25_PLAYLIST_NAME }}
-
         run: python smart_playlists.py
 
       - name: Upload Execution Logs
@@ -51,6 +68,6 @@ jobs:
         if: always()
         with:
           name: spotify-sync-logs
-          # Adjust the path below if your logger saves to a specific folder
           path: logs/*.log
+          if-no-files-found: ignore
           retention-days: 7
