@@ -2,8 +2,8 @@ name: Spotify Playlist Sync
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-      timezone: 'America/Chicago'
+    # 05:00 UTC = 12:00 AM Central (CDT) Daily
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -16,17 +16,17 @@ permissions:
 jobs:
   run-sync:
     name: Sync Spotify Playlists
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5.4.0
         with:
-          python-version: '3.13'
+          python-version: '3.12.3'
           cache: 'pip'
 
       - name: Install dependencies
@@ -64,7 +64,7 @@ jobs:
         run: python smart_playlists.py
 
       - name: Upload Execution Logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4.6.1
         if: always()
         with:
           name: spotify-sync-logs
