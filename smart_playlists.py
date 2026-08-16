@@ -13,7 +13,7 @@ from collections import defaultdict
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 from utils.common import setup_logger, get_spotify_client, format_elapsed_time
 
@@ -184,7 +184,7 @@ def update_recent_tracks_playlist(
 
 def _create_track_dict(
     track: Optional[dict[str, Any]],
-    added_at: Optional[Union[str, datetime]] = None
+    added_at: Optional[str | datetime] = None
 ) -> Optional[dict[str, Any]]:
     """Create a standardized track dictionary with normalized key."""
     if not track or not track.get('uri'):
