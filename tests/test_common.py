@@ -1,31 +1,31 @@
 import logging
-import pytest
 from unittest.mock import MagicMock, patch
-from utils.common import PrintAndLogHandler, setup_logger, get_spotify_client, format_elapsed_time
+
+from utils.common import PrintAndLogHandler, format_elapsed_time, get_spotify_client, setup_logger
 
 
 def test_print_and_log_handler_normal():
     handler = PrintAndLogHandler()
-    formatter = logging.Formatter('%(message)s')
+    formatter = logging.Formatter("%(message)s")
     handler.setFormatter(formatter)
-    record = logging.LogRecord('test', logging.INFO, '', 0, 'Test message', (), None)
+    record = logging.LogRecord("test", logging.INFO, "", 0, "Test message", (), None)
 
-    with patch('builtins.print') as mock_print:
+    with patch("builtins.print") as mock_print:
         handler.emit(record)
-        mock_print.assert_called_once_with('Test message')
+        mock_print.assert_called_once_with("Test message")
 
 
 def test_print_and_log_handler_unicode_encode_error():
     handler = PrintAndLogHandler()
-    formatter = logging.Formatter('%(message)s')
+    formatter = logging.Formatter("%(message)s")
     handler.setFormatter(formatter)
-    record = logging.LogRecord('test', logging.INFO, '', 0, 'Test \u266a music', (), None)
+    record = logging.LogRecord("test", logging.INFO, "", 0, "Test \u266a music", (), None)
 
-    with patch('builtins.print') as mock_print:
+    with patch("builtins.print") as mock_print:
         # First print raises UnicodeEncodeError, second print succeeds with ascii fallback
         mock_print.side_effect = [
-            UnicodeEncodeError('ascii', 'Test \u266a music', 5, 6, 'ordinal not in range'),
-            None
+            UnicodeEncodeError("ascii", "Test \u266a music", 5, 6, "ordinal not in range"),
+            None,
         ]
         handler.emit(record)
         assert mock_print.call_count == 2
@@ -39,13 +39,13 @@ def test_setup_logger(tmp_path):
 
 
 def test_get_spotify_client():
-    with patch('utils.common.spotipy.Spotify') as mock_sp_cls:
+    with patch("utils.common.spotipy.Spotify") as mock_sp_cls:
         client = get_spotify_client(
-            client_id='id1',
-            client_secret='sec1',
-            redirect_uri='http://localhost:8888',
-            scope='user-read',
-            requests_timeout=20
+            client_id="id1",
+            client_secret="sec1",
+            redirect_uri="http://localhost:8888",
+            scope="user-read",
+            requests_timeout=20,
         )
         assert client == mock_sp_cls.return_value
 
