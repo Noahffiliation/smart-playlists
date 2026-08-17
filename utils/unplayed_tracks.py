@@ -94,9 +94,7 @@ def main(
         env_source_ids = getenv("SOURCE_PLAYLIST_IDS", "")
         source_playlist_ids = [pid.strip() for pid in env_source_ids.split(",") if pid.strip()]
 
-    target_name = (
-        unplayed_playlist_name or getenv("UNPLAYED_PLAYLIST_NAME") or "Unplayed Tracks"
-    )
+    target_name = unplayed_playlist_name or getenv("UNPLAYED_PLAYLIST_NAME") or "Unplayed Tracks"
 
     # 1. Fetch library once
     logger.info("Fetching Spotify library...")
