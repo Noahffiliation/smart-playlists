@@ -542,9 +542,7 @@ def main(
     target_name = target_playlist_name or getenv("TARGET_PLAYLIST_NAME") or "Recently Added"
     top_name = top_25_playlist_name or getenv("TOP_25_PLAYLIST_NAME") or "Top 25 Most Played"
     bottom_name = (
-        bottom_25_playlist_name
-        or getenv("BOTTOM_25_PLAYLIST_NAME")
-        or "Top 25 Least Played"
+        bottom_25_playlist_name or getenv("BOTTOM_25_PLAYLIST_NAME") or "Top 25 Least Played"
     )
 
     # 1. Fetch library once
