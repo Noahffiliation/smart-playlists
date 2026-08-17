@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import logging
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth
 from datetime import datetime
 from os import getenv, makedirs
 from os.path import join
-from pathlib import Path
-from typing import Optional
+
+import requests
+import spotipy
+from requests.adapters import HTTPAdapter
+from spotipy.oauth2 import SpotifyOAuth
+from urllib3.util import Retry
 
 
 class PrintAndLogHandler(logging.Handler):
@@ -22,18 +21,18 @@ class PrintAndLogHandler(logging.Handler):
             print(msg)
         except UnicodeEncodeError:
             # Fallback to ascii if terminal doesn't support Unicode
-            msg = self.format(record).encode('ascii', 'replace').decode()
+            msg = self.format(record).encode("ascii", "replace").decode()
             print(msg)
 
 
-def setup_logger(name: str, log_prefix: str, logs_dir: str = 'logs') -> logging.Logger:
+def setup_logger(name: str, log_prefix: str, logs_dir: str = "logs") -> logging.Logger:
     """Configure and return a standardized logger with file and console handlers."""
     makedirs(logs_dir, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = join(logs_dir, f'{log_prefix}_{timestamp}.log')
-    formatter = logging.Formatter('%(message)s')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = join(logs_dir, f"{log_prefix}_{timestamp}.log")
+    formatter = logging.Formatter("%(message)s")
 
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
 
     print_handler = PrintAndLogHandler()
@@ -59,34 +58,31 @@ def create_robust_session() -> requests.Session:
         raise_on_status=False,
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
-    session.mount('https://', adapter)
+    session.mount("https://", adapter)
     return session
 
 
 def get_spotify_client(
-    client_id: Optional[str] = None,
-    client_secret: Optional[str] = None,
-    redirect_uri: Optional[str] = None,
-    scope: str = 'user-follow-read user-library-read playlist-modify-public playlist-modify-private',
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    redirect_uri: str | None = None,
+    scope: str = "user-follow-read user-library-read playlist-modify-public playlist-modify-private",
     requests_timeout: int = 15,
-    requests_session: Optional[requests.Session] = None
+    requests_session: requests.Session | None = None,
 ) -> spotipy.Spotify:
     """Initialize and return Spotify client with OAuth and resilient connection retries."""
-    c_id = client_id or getenv('CLIENT_ID')
-    c_secret = client_secret or getenv('CLIENT_SECRET')
-    r_uri = redirect_uri or getenv('REDIRECT_URI')
+    c_id = client_id or getenv("CLIENT_ID")
+    c_secret = client_secret or getenv("CLIENT_SECRET")
+    r_uri = redirect_uri or getenv("REDIRECT_URI")
     session = requests_session or create_robust_session()
 
     return spotipy.Spotify(
         auth_manager=SpotifyOAuth(
-            client_id=c_id,
-            client_secret=c_secret,
-            redirect_uri=r_uri,
-            scope=scope
+            client_id=c_id, client_secret=c_secret, redirect_uri=r_uri, scope=scope
         ),
         requests_timeout=requests_timeout,
         requests_session=session,
-        retries=5
+        retries=5,
     )
 
 
