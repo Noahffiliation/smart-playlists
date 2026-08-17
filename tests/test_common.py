@@ -39,7 +39,10 @@ def test_setup_logger(tmp_path):
 
 
 def test_get_spotify_client():
-    with patch("utils.common.spotipy.Spotify") as mock_sp_cls:
+    with (
+        patch("utils.common.spotipy.Spotify") as mock_sp_cls,
+        patch("utils.common.SpotifyOAuth") as mock_oauth_cls,
+    ):
         client = get_spotify_client(
             client_id="id1",
             client_secret="sec1",
@@ -48,10 +51,21 @@ def test_get_spotify_client():
             requests_timeout=20,
         )
         assert client == mock_sp_cls.return_value
+        mock_oauth_cls.assert_called_with(
+            client_id="id1",
+            client_secret="sec1",
+            redirect_uri="http://localhost:8888",
+            scope="user-read",
+        )
 
         # Custom requests_session
         custom_session = MagicMock()
-        client_custom = get_spotify_client(requests_session=custom_session)
+        client_custom = get_spotify_client(
+            client_id="id2",
+            client_secret="sec2",
+            redirect_uri="http://localhost:8888",
+            requests_session=custom_session,
+        )
         assert client_custom == mock_sp_cls.return_value
 
 
