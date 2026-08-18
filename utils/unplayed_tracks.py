@@ -13,8 +13,6 @@ from datetime import datetime
 from os import getenv
 from typing import Any
 
-import pylast
-import spotipy
 from dotenv import load_dotenv
 
 from smart_playlists import (
@@ -32,15 +30,13 @@ load_dotenv()
 def generate_unplayed_playlist(
     spotify_library: dict[str, dict[str, Any]],
     unplayed_playlist_name: str,
-    client: spotipy.Spotify | None = None,
-    lastfm_network: pylast.LastFMNetwork | None = None,
 ) -> list[dict[str, Any]]:
     """Create/update playlist with tracks that have 0 playcount on Last.fm."""
     logger.info("\n" + "=" * 50)
     logger.info("CREATING UNPLAYED TRACKS PLAYLIST")
     logger.info("=" * 50)
 
-    matched_tracks = match_spotify_with_lastfm(spotify_library, lastfm_network=lastfm_network)
+    matched_tracks = match_spotify_with_lastfm(spotify_library)
 
     # Filter tracks with 0 plays in bulk cache
     unplayed_tracks = [t for t in matched_tracks if t["playcount"] == 0]
@@ -53,9 +49,7 @@ def generate_unplayed_playlist(
     lock = threading.Lock()
 
     def verify_track(track_info: dict[str, Any]) -> None:
-        pc = get_lastfm_track_playcount(
-            track_info["artist"], track_info["name"], lastfm_network=lastfm_network
-        )
+        pc = get_lastfm_track_playcount(track_info["artist"], track_info["name"])
         if pc == 0:
             with lock:
                 verified_unplayed.append(track_info)
@@ -76,15 +70,13 @@ def generate_unplayed_playlist(
     # A Spotify playlist can hold a lot of tracks, we'll add them all
     unplayed_track_uris = [t["uri"] for t in verified_unplayed]
 
-    create_or_update_playlist(unplayed_playlist_name, unplayed_track_uris, client=client)
+    create_or_update_playlist(unplayed_playlist_name, unplayed_track_uris)
     return verified_unplayed
 
 
 def main(
     source_playlist_ids: list[str] | None = None,
     unplayed_playlist_name: str | None = None,
-    client: spotipy.Spotify | None = None,
-    lastfm_network: pylast.LastFMNetwork | None = None,
 ) -> None:
     """Main execution function for generating unplayed playlist."""
     script_start = time.time()
@@ -98,13 +90,11 @@ def main(
 
     # 1. Fetch library once
     logger.info("Fetching Spotify library...")
-    full_library = get_all_spotify_library_tracks(source_playlist_ids, client=client)
+    full_library = get_all_spotify_library_tracks(source_playlist_ids)
 
     # 2. Generate unplayed playlist
     operation_start = time.time()
-    generate_unplayed_playlist(
-        full_library, target_name, client=client, lastfm_network=lastfm_network
-    )
+    generate_unplayed_playlist(full_library, target_name)
     operation_time = time.time() - operation_start
     logger.info(
         f"\nUnplayed tracks playlist update completed in {format_elapsed_time(operation_time)}"
