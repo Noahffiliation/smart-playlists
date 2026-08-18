@@ -68,6 +68,26 @@ def test_get_spotify_client():
         )
         assert client_custom == mock_sp_cls.return_value
 
+        # Fallback to SPOTIPY_* env vars
+        with patch.dict(
+            "os.environ",
+            {
+                "CLIENT_ID": "",
+                "CLIENT_SECRET": "",
+                "REDIRECT_URI": "",
+                "SPOTIPY_CLIENT_ID": "spotipy_id",
+                "SPOTIPY_CLIENT_SECRET": "spotipy_sec",
+                "SPOTIPY_REDIRECT_URI": "http://localhost:8888/spotipy",
+            },
+        ):
+            get_spotify_client()
+            mock_oauth_cls.assert_called_with(
+                client_id="spotipy_id",
+                client_secret="spotipy_sec",
+                redirect_uri="http://localhost:8888/spotipy",
+                scope="user-follow-read user-library-read playlist-modify-public playlist-modify-private",
+            )
+
 
 def test_format_elapsed_time():
     assert format_elapsed_time(5) == "5s"

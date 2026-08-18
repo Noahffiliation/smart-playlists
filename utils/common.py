@@ -71,9 +71,9 @@ def get_spotify_client(
     requests_session: requests.Session | None = None,
 ) -> spotipy.Spotify:
     """Initialize and return Spotify client with OAuth and resilient connection retries."""
-    c_id = client_id or getenv("CLIENT_ID")
-    c_secret = client_secret or getenv("CLIENT_SECRET")
-    r_uri = redirect_uri or getenv("REDIRECT_URI")
+    c_id = client_id or getenv("CLIENT_ID") or getenv("SPOTIPY_CLIENT_ID")
+    c_secret = client_secret or getenv("CLIENT_SECRET") or getenv("SPOTIPY_CLIENT_SECRET")
+    r_uri = redirect_uri or getenv("REDIRECT_URI") or getenv("SPOTIPY_REDIRECT_URI")
     session = requests_session or create_robust_session()
 
     return spotipy.Spotify(

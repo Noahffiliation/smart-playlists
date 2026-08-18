@@ -17,21 +17,24 @@ from spotipy.oauth2 import SpotifyOAuth
 
 load_dotenv()
 
-CLIENT_ID = getenv("CLIENT_ID")
-CLIENT_SECRET = getenv("CLIENT_SECRET")
-REDIRECT_URI = getenv("REDIRECT_URI")
+CLIENT_ID = getenv("CLIENT_ID") or getenv("SPOTIPY_CLIENT_ID")
+CLIENT_SECRET = getenv("CLIENT_SECRET") or getenv("SPOTIPY_CLIENT_SECRET")
+REDIRECT_URI = getenv("REDIRECT_URI") or getenv("SPOTIPY_REDIRECT_URI")
 LASTFM_API_KEY = getenv("LASTFM_API_KEY") or ""
 LASTFM_USERNAME = getenv("LASTFM_USERNAME") or ""
 
-sp = spotipy.Spotify(
-    auth_manager=SpotifyOAuth(
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-        redirect_uri=REDIRECT_URI,
-        scope="user-follow-read user-library-read playlist-modify-public playlist-modify-private",
-    ),
-    requests_timeout=15,
-)
+try:
+    sp = spotipy.Spotify(
+        auth_manager=SpotifyOAuth(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            redirect_uri=REDIRECT_URI,
+            scope="user-follow-read user-library-read playlist-modify-public playlist-modify-private",
+        ),
+        requests_timeout=15,
+    )
+except Exception:
+    sp = None  # type: ignore[assignment]
 
 network = pylast.LastFMNetwork(
     api_key=LASTFM_API_KEY,
