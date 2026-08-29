@@ -2,8 +2,13 @@ name: Spotify New Releases
 
 on:
   schedule:
-    # 04:01 UTC = 11:01 PM Central (CDT) Daily
-    - cron: '1 4 * * *'
+    # Runs at 11:01 PM Central during Daylight Saving Time (March to November)
+    # 04:01 UTC
+    - cron: '1 4 * 3-11 *'
+
+    # Runs at 11:01 PM Central during Standard Time (November to March)
+    # 05:01 UTC
+    - cron: '1 5 * 1-3,11-12 *'
   workflow_dispatch:
 
 concurrency:
