@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from os import getenv, makedirs
 from os.path import join
+from typing import Any, cast
 
 import requests
 import spotipy
@@ -62,13 +63,20 @@ def create_robust_session() -> requests.Session:
     return session
 
 
+DEFAULT_SCOPE = (
+    "user-follow-read user-library-read playlist-read-private "
+    "playlist-modify-public playlist-modify-private"
+)
+
+
 def get_spotify_client(
     client_id: str | None = None,
     client_secret: str | None = None,
     redirect_uri: str | None = None,
-    scope: str = "user-follow-read user-library-read playlist-modify-public playlist-modify-private",
+    scope: str = DEFAULT_SCOPE,
     requests_timeout: int = 15,
     requests_session: requests.Session | None = None,
+    open_browser: bool = True,
 ) -> spotipy.Spotify:
     """Initialize and return Spotify client with OAuth and resilient connection retries."""
     c_id = client_id or getenv("CLIENT_ID") or getenv("SPOTIPY_CLIENT_ID")
@@ -78,10 +86,14 @@ def get_spotify_client(
 
     return spotipy.Spotify(
         auth_manager=SpotifyOAuth(
-            client_id=c_id, client_secret=c_secret, redirect_uri=r_uri, scope=scope
+            client_id=c_id,
+            client_secret=c_secret,
+            redirect_uri=r_uri,
+            scope=scope,
+            open_browser=open_browser,
         ),
         requests_timeout=requests_timeout,
-        requests_session=session,
+        requests_session=cast(Any, session),
         retries=5,
     )
 

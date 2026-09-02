@@ -11,30 +11,21 @@ from os.path import join
 from typing import Any
 
 import pylast
-import spotipy
 from dotenv import load_dotenv
-from spotipy.oauth2 import SpotifyOAuth
+
+from utils.common import get_spotify_client
 
 load_dotenv()
 
-CLIENT_ID = getenv("CLIENT_ID") or getenv("SPOTIPY_CLIENT_ID")
-CLIENT_SECRET = getenv("CLIENT_SECRET") or getenv("SPOTIPY_CLIENT_SECRET")
-REDIRECT_URI = getenv("REDIRECT_URI") or getenv("SPOTIPY_REDIRECT_URI")
 LASTFM_API_KEY = getenv("LASTFM_API_KEY") or ""
 LASTFM_USERNAME = getenv("LASTFM_USERNAME") or ""
 
 try:
-    sp = spotipy.Spotify(
-        auth_manager=SpotifyOAuth(
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            redirect_uri=REDIRECT_URI,
-            scope="user-follow-read user-library-read playlist-modify-public playlist-modify-private",
-        ),
-        requests_timeout=15,
-    )
+    sp = get_spotify_client()
 except Exception:
     sp = None  # type: ignore[assignment]
+
+ERR_SPOTIFY_NOT_INITIALIZED = "Spotify client is not initialized."
 
 network = pylast.LastFMNetwork(
     api_key=LASTFM_API_KEY,
@@ -80,7 +71,7 @@ logger.addHandler(file_handler)
 logger.addHandler(print_handler)
 
 
-def retry_on_rate_limit(max_retries=3, initial_delay=1):
+def retry_on_rate_limit(max_retries: int = 3, initial_delay: float = 1.0):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -113,14 +104,18 @@ def retry_on_rate_limit(max_retries=3, initial_delay=1):
 
 
 def get_all_playlist_tracks(playlist_id):
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
     tracks = []
     offset = 0
     limit = 100
     while True:
         try:
             results = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
+            if not results or not results.get("items"):
+                break
             tracks.extend([item for item in results["items"] if item and item.get("track")])
-            if not results["next"]:
+            if not results.get("next"):
                 break
             offset += limit
             # Removed time.sleep(0.1) as Spotipy handles retries/rate limits
@@ -131,15 +126,21 @@ def get_all_playlist_tracks(playlist_id):
 
 
 def get_liked_songs():
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
     liked_tracks = []
     offset = 0
     limit = 50
     while True:
         results = sp.current_user_saved_tracks(limit=limit, offset=offset)
-        if not results["items"]:
+        if not results or not results.get("items"):
             break
         liked_tracks.extend(
-            [{"track": item["track"], "added_at": item["added_at"]} for item in results["items"]]
+            [
+                {"track": item["track"], "added_at": item["added_at"]}
+                for item in results["items"]
+                if item
+            ]
         )
         offset += limit
         if len(liked_tracks) > 0 and len(liked_tracks) % 500 == 0:
@@ -233,10 +234,15 @@ def _add_liked_songs_to_library(all_tracks):
 
 def _add_playlist_tracks_to_library(all_tracks, playlist_ids):
     """Add playlist tracks to the track library, keeping the oldest added_at date"""
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
     for playlist_id in playlist_ids:
         try:
             playlist = sp.playlist(playlist_id)
-            logger.info(f"Fetching tracks from: {playlist['name']}")
+            if not playlist:
+                continue
+            name = playlist.get("name", playlist_id)
+            logger.info(f"Fetching tracks from: {name}")
             tracks = get_all_playlist_tracks(playlist_id)
 
             for item in tracks:
@@ -251,11 +257,19 @@ def get_all_spotify_library_tracks(playlist_ids):
     start_time = time.time()
 
     # Pre-validate/refresh auth token before spinning up worker threads
-    try:
-        if sp.auth_manager:
-            sp.auth_manager.get_access_token(as_dict=False)
-    except Exception as e:
-        logger.warning(f"Could not pre-refresh Spotify auth token: {e}")
+    if sp and sp.auth_manager:
+        try:
+            token = sp.auth_manager.get_access_token(as_dict=False)
+            if not token:
+                raise RuntimeError("Failed to obtain a valid Spotify access token.")
+        except Exception as e:
+            logger.exception(
+                f"Spotify authentication failed: {e}. "
+                "Please check your credentials or run 'python utils/generate_auth.py' to authenticate."
+            )
+            raise
+    elif sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
 
     all_tracks: dict[str, Any] = {}
 
@@ -293,6 +307,30 @@ def get_lastfm_track_playcount(artist, track):
         return 0
 
 
+def _extract_lastfm_track_key(top_track: Any) -> str | None:
+    """Extract normalized artist|||track key from a Last.fm TopItem."""
+    item: Any = getattr(top_track, "item", None)
+    if not item:
+        return None
+
+    artist_obj = getattr(item, "artist", None)
+    artist_name = getattr(artist_obj, "name", None) if artist_obj else None
+    track_title = getattr(item, "title", None)
+
+    if not artist_name or not track_title:
+        return None
+
+    return f"{str(artist_name).lower()}|||{str(track_title).lower()}"
+
+
+def _handle_lastfm_fetch_error(error: Exception) -> None:
+    """Handle Last.fm bulk fetch errors."""
+    if isinstance(error, pylast.WSError) and str(error.status) == "29":
+        logger.warning("Rate limit hit during bulk fetch.")
+    else:
+        logger.exception(f"Error during bulk fetch: {error}")
+
+
 def get_all_lastfm_playcounts():
     """Fetch all playcounts from Last.fm library in bulk using streaming API"""
     logger.info("=== Fetching all Last.fm playcounts in bulk ===")
@@ -305,23 +343,18 @@ def get_all_lastfm_playcounts():
         top_tracks = user.get_top_tracks(period=pylast.PERIOD_OVERALL, stream=True)
 
         for top_track in top_tracks:
-            artist = top_track.item.artist.name.lower()
-            track_name = top_track.item.title.lower()
-            key = f"{artist}|||{track_name}"
+            key = _extract_lastfm_track_key(top_track)
+            if not key:
+                continue
 
             # Since we could potentially get thousands of tracks, we only store the weight
             playcounts[key] = int(top_track.weight)
 
-            if len(playcounts) > 0 and len(playcounts) % 500 == 0:
+            if len(playcounts) % 500 == 0:
                 logger.info(f"Cached {len(playcounts)} tracks...")
 
-    except pylast.WSError as e:
-        if str(e.status) == "29":  # Rate limit exceeded
-            logger.warning("Rate limit hit during bulk fetch.")
-        else:
-            logger.exception(f"Error during bulk fetch: {e}")
     except Exception as e:
-        logger.exception(f"Error during bulk fetch: {e}")
+        _handle_lastfm_fetch_error(e)
 
     logger.info(f"Successfully cached {len(playcounts)} tracks from Last.fm")
     return playcounts
@@ -374,20 +407,31 @@ def match_spotify_with_lastfm(spotify_tracks):
 
 def create_or_update_playlist(playlist_name, track_uris):
     """Create or update a playlist with given tracks"""
-    playlists = sp.current_user_playlists()["items"]
-    target_playlist = next((p for p in playlists if p["name"] == playlist_name), None)
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
+
+    playlists_resp = sp.current_user_playlists()
+    playlists = playlists_resp.get("items", []) if playlists_resp else []
+    target_playlist = next((p for p in playlists if p and p.get("name") == playlist_name), None)
 
     if target_playlist:
-        sp.playlist_replace_items(target_playlist["id"], [])
+        playlist_id = target_playlist["id"]
+        sp.playlist_replace_items(playlist_id, [])
     else:
-        user_id = sp.current_user()["id"]
-        target_playlist = sp.user_playlist_create(user_id, playlist_name, public=True)
+        user = sp.current_user()
+        if not user:
+            raise RuntimeError("Failed to retrieve current Spotify user.")
+        user_id = user["id"]
+        created = sp.user_playlist_create(user_id, playlist_name, public=True)
+        if not created:
+            raise RuntimeError(f"Failed to create playlist '{playlist_name}'.")
+        playlist_id = created["id"]
 
     if track_uris:
         batch_size = 100
         for i in range(0, len(track_uris), batch_size):
             batch = track_uris[i : i + batch_size]
-            sp.playlist_add_items(target_playlist["id"], batch)
+            sp.playlist_add_items(playlist_id, batch)
         logger.info(f"Updated '{playlist_name}' with {len(track_uris)} tracks")
     else:
         logger.info(f"No tracks to add to '{playlist_name}'")

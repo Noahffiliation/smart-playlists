@@ -22,20 +22,50 @@ load_dotenv()
 MIN_LIKED_SONGS = int(getenv("MIN_LIKED_SONGS", "10"))
 
 
+def _collect_artist_ids(artists_data: dict[str, Any], target_set: set[str]) -> None:
+    """Extract and add artist IDs from an artists page object into a set."""
+    for artist in artists_data.get("items", []):
+        if artist and artist.get("id"):
+            target_set.add(artist["id"])
+
+
 def get_followed_artist_ids(sp: spotipy.Spotify) -> set[str]:
     """Get all artist IDs the user follows."""
     followed: set[str] = set()
     results = sp.current_user_followed_artists(limit=50)
+    if not results or not results.get("artists"):
+        return followed
 
-    for artist in results["artists"]["items"]:
-        followed.add(artist["id"])
+    artists_data = results["artists"]
+    _collect_artist_ids(artists_data, followed)
 
-    while results["artists"]["next"]:
-        results = sp.next(results["artists"])
-        for artist in results["artists"]["items"]:
-            followed.add(artist["id"])
+    while artists_data.get("next"):
+        next_results = sp.next(artists_data)
+        if not next_results or not next_results.get("artists"):
+            break
+        artists_data = next_results["artists"]
+        _collect_artist_ids(artists_data, followed)
 
     return followed
+
+
+def _process_saved_track_item(
+    item: dict[str, Any] | None, counts: dict[str, int], names: dict[str, str]
+) -> None:
+    """Extract primary artist from a saved track item and update counts."""
+    if not item:
+        return
+    track = item.get("track")
+    if not track or not track.get("artists"):
+        return
+
+    artist = track["artists"][0]
+    if not artist or not artist.get("id"):
+        return
+
+    artist_id = artist["id"]
+    counts[artist_id] += 1
+    names[artist_id] = artist.get("name", "Unknown")
 
 
 def count_liked_songs_by_artist(sp: spotipy.Spotify) -> tuple[dict[str, int], dict[str, str]]:
@@ -47,18 +77,11 @@ def count_liked_songs_by_artist(sp: spotipy.Spotify) -> tuple[dict[str, int], di
 
     while True:
         results = sp.current_user_saved_tracks(limit=limit, offset=offset)
-        if not results["items"]:
+        if not results or not results.get("items"):
             break
 
         for item in results["items"]:
-            track = item.get("track")
-            if not track or not track.get("artists"):
-                continue
-
-            artist = track["artists"][0]
-            artist_id = artist["id"]
-            counts[artist_id] += 1
-            names[artist_id] = artist["name"]
+            _process_saved_track_item(item, counts, names)
 
         if not results.get("next"):
             break
@@ -109,7 +132,7 @@ def main(
     logger.info("Unfollowed artists with many liked songs")
     logger.info("=" * 60)
 
-    sp = client or get_spotify_client(scope="user-follow-read user-library-read")
+    sp = client or get_spotify_client()
 
     logger.info("Fetching followed artists...")
     followed_ids = get_followed_artist_ids(sp)

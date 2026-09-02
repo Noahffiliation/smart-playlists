@@ -159,6 +159,14 @@ def test_get_all_playlist_tracks(mock_spotify):
     err_tracks = smart_playlists.get_all_playlist_tracks("err_id")
     assert err_tracks == []
 
+    # Empty results
+    mock_spotify.playlist_tracks.side_effect = [None]
+    assert smart_playlists.get_all_playlist_tracks("empty_id") == []
+
+    # sp is None branch
+    with patch("smart_playlists.sp", None), pytest.raises(RuntimeError):
+        smart_playlists.get_all_playlist_tracks("p_id")
+
 
 def test_get_liked_songs(mock_spotify):
     # Test with 500 items to trigger progress logging
@@ -168,6 +176,10 @@ def test_get_liked_songs(mock_spotify):
     mock_spotify.current_user_saved_tracks.side_effect = [{"items": items_500}, {"items": []}]
     tracks = smart_playlists.get_liked_songs()
     assert len(tracks) == 500
+
+    # sp is None branch
+    with patch("smart_playlists.sp", None), pytest.raises(RuntimeError):
+        smart_playlists.get_liked_songs()
 
 
 def test_add_liked_songs_to_library(mock_spotify):
@@ -190,15 +202,25 @@ def test_add_liked_songs_to_library(mock_spotify):
 
 
 def test_add_playlist_tracks_to_library(mock_spotify):
-    mock_spotify.playlist.side_effect = [{"name": "P1"}, Exception("Failed to fetch playlist")]
+    mock_spotify.playlist.side_effect = [
+        {"name": "P1"},
+        None,
+        Exception("Failed to fetch playlist"),
+    ]
     with patch("smart_playlists.get_all_playlist_tracks") as mock_get:
         mock_get.return_value = [{"track": {"uri": "t1", "name": "N", "artists": [{"name": "A"}]}}]
         all_tracks: dict[str, Any] = {}
         # Normal
         smart_playlists._add_playlist_tracks_to_library(all_tracks, ["id1"])
         assert "t1" in all_tracks
+        # None playlist branch
+        smart_playlists._add_playlist_tracks_to_library(all_tracks, ["id_none"])
         # Exception branch
         smart_playlists._add_playlist_tracks_to_library(all_tracks, ["id2"])
+
+    # sp is None branch
+    with patch("smart_playlists.sp", None), pytest.raises(RuntimeError):
+        smart_playlists._add_playlist_tracks_to_library(all_tracks, ["id1"])
 
 
 def test_get_all_spotify_library_tracks(mock_spotify):
@@ -219,10 +241,23 @@ def test_get_all_spotify_library_tracks(mock_spotify):
         mock_playlist.assert_called_once()
 
         # Exception during auth pre-refresh
-        smart_playlists.get_all_spotify_library_tracks(["ids"])
+        with pytest.raises(Exception, match="Auth token error"):
+            smart_playlists.get_all_spotify_library_tracks(["ids"])
 
         # Exception inside future
         mock_playlist.side_effect = Exception("Worker thread failure")
+        smart_playlists.get_all_spotify_library_tracks(["ids"])
+
+    # None token returned
+    mock_spotify.auth_manager.get_access_token.side_effect = [None]
+    with pytest.raises(RuntimeError, match="Failed to obtain a valid Spotify access token"):
+        smart_playlists.get_all_spotify_library_tracks(["ids"])
+
+    # sp is None branch
+    with (
+        patch("smart_playlists.sp", None),
+        pytest.raises(RuntimeError, match="Spotify client is not initialized"),
+    ):
         smart_playlists.get_all_spotify_library_tracks(["ids"])
 
 
@@ -259,8 +294,16 @@ def test_get_all_lastfm_playcounts(mock_lastfm):
     mock_user = MagicMock()
     mock_lastfm.get_user.return_value = mock_user
 
-    # Generate 500 tracks to trigger progress logging
+    # Generate 500 tracks to trigger progress logging + tracks with missing fields
     tracks_500 = []
+    t_empty = MagicMock()
+    t_empty.item.artist.name = ""
+    t_empty.item.title = ""
+    tracks_500.append(t_empty)
+
+    t_no_item = MagicMock(item=None)
+    tracks_500.append(t_no_item)
+
     for i in range(500):
         t = MagicMock()
         t.item.artist.name = f"Artist{i}"
@@ -352,6 +395,21 @@ def test_create_or_update_playlist(mock_spotify):
     mock_spotify.user_playlist_create.return_value = {"id": "p2"}
     smart_playlists.create_or_update_playlist("P2", [])
     mock_spotify.user_playlist_create.assert_called_with("user_id", "P2", public=True)
+
+    # current_user returns None
+    mock_spotify.current_user.return_value = None
+    with pytest.raises(RuntimeError, match="Failed to retrieve current Spotify user"):
+        smart_playlists.create_or_update_playlist("P3", [])
+
+    # user_playlist_create returns None
+    mock_spotify.current_user.return_value = {"id": "user_id"}
+    mock_spotify.user_playlist_create.return_value = None
+    with pytest.raises(RuntimeError, match="Failed to create playlist"):
+        smart_playlists.create_or_update_playlist("P4", [])
+
+    # sp is None branch
+    with patch("smart_playlists.sp", None), pytest.raises(RuntimeError):
+        smart_playlists.create_or_update_playlist("P5", [])
 
 
 def test_update_playcount_playlists(mock_spotify):
