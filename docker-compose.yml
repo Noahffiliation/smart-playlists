@@ -1,0 +1,9 @@
+services:
+  smart-playlists:
+    build: .
+    container_name: smart-playlists
+    restart: "no"
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
