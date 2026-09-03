@@ -9,7 +9,8 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.txt && \
+    pip uninstall -y pip setuptools wheel
 
 COPY smart_playlists.py new_releases.py ./
 COPY utils ./utils

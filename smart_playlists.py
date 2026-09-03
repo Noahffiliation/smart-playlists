@@ -1,110 +1,80 @@
-from __future__ import annotations
-
+import logging
 import random
-import re
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from functools import wraps
-from os import getenv
+from os import getenv, makedirs
+from os.path import join
 from typing import Any
 
 import pylast
-import spotipy
 from dotenv import load_dotenv
 
-from utils.common import format_elapsed_time, get_spotify_client, setup_logger
+from utils.common import get_spotify_client
 
 load_dotenv()
 
-CLIENT_ID = getenv("CLIENT_ID")
-CLIENT_SECRET = getenv("CLIENT_SECRET")
-REDIRECT_URI = getenv("REDIRECT_URI")
-LASTFM_API_KEY = getenv("LASTFM_API_KEY")
-LASTFM_USERNAME = getenv("LASTFM_USERNAME")
+LASTFM_API_KEY = getenv("LASTFM_API_KEY") or ""
+LASTFM_USERNAME = getenv("LASTFM_USERNAME") or ""
 
-
-def get_lastfm_client(
-    api_key: str | None = None, username: str | None = None
-) -> pylast.LastFMNetwork:
-    """Initialize and return Last.fm client."""
-    return pylast.LastFMNetwork(
-        api_key=api_key or getenv("LASTFM_API_KEY") or "",
-        username=username or getenv("LASTFM_USERNAME") or "",
-    )
-
-
-# Module-level instances for direct access and backward-compatible test fixtures
-sp: Any = None
 try:
     sp = get_spotify_client()
 except Exception:
-    sp = None
+    sp = None  # type: ignore[assignment]
 
-network: Any = None
-try:
-    network = get_lastfm_client()
-except Exception:
-    network = None
+ERR_SPOTIFY_NOT_INITIALIZED = "Spotify client is not initialized."
+
+network = pylast.LastFMNetwork(
+    api_key=LASTFM_API_KEY,
+    username=LASTFM_USERNAME,
+)
 
 date_format = "%Y-%m-%dT%H:%M:%SZ"
 library_lock = threading.Lock()
 
-# Setup logger using common utility
-logger = setup_logger("smart_playlists", "smart_playlists")
+
+class PrintAndLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            print(msg)
+        except UnicodeEncodeError:
+            # Fallback to ascii if terminal doesn't support Unicode
+            msg = self.format(record).encode("ascii", "replace").decode()
+            print(msg)
 
 
-def normalize_track_title(title: str | None) -> str:
-    """Normalize a track title or artist name by stripping remaster/feat/live tags and extra whitespace."""
-    if not title:
-        return ""
-    text = title.lower().strip()
+# Create logs directory if it doesn't exist
+LOGS_DIR = join("logs")
+makedirs(LOGS_DIR, exist_ok=True)
 
-    metadata_keywords = (
-        "remaster",
-        "live",
-        "deluxe",
-        "edition",
-        "bonus",
-        "radio edit",
-        "original mix",
-        "single version",
-        "mono",
-        "stereo",
-        "mix",
-        "feat",
-        "featuring",
-        "ft",
-    )
+# Configure logging with timestamp in filename
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_file = join(LOGS_DIR, f"smart_playlists_{timestamp}.log")
+formatter = logging.Formatter("%(message)s")
 
-    def _strip_bracket_tags(match: re.Match) -> str:
-        content = match.group(0)
-        if any(kw in content for kw in metadata_keywords):
-            return ""
-        return content
+# File handler with unique filename and UTF-8 encoding
+file_handler = logging.FileHandler(log_file, encoding="utf-8")
+file_handler.setFormatter(formatter)
 
-    # Strip bracketed metadata tags (e.g. "(2011 Remaster)", "[Live at Wembley]", "(feat. Artist)")
-    text = re.sub(r"[\(\[\{][^)\]\}]*[\)\]\}]", _strip_bracket_tags, text)
+# Custom print handler
+print_handler = PrintAndLogHandler()
+print_handler.setFormatter(formatter)
 
-    # Strip trailing hyphen tags (e.g. " - Remastered", " - feat. Artist")
-    if " - " in text:
-        parts = text.split(" - ")
-        if len(parts) > 1 and any(kw in parts[-1] for kw in metadata_keywords):
-            text = " - ".join(parts[:-1])
-
-    # Strip quotation marks
-    text = re.sub(r'["\']', "", text)
-    # Normalize multiple whitespaces
-    return re.sub(r"\s+", " ", text).strip()
+# Setup logger
+logger = logging.getLogger("smart_playlists")
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(print_handler)
 
 
-def retry_on_rate_limit(max_retries: int = 3, initial_delay: float = 1.0) -> Callable:
-    def decorator(func: Callable) -> Callable:
+def retry_on_rate_limit(max_retries: int = 3, initial_delay: float = 1.0):
+    def decorator(func):
         @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args, **kwargs):
             retries = 0
             while retries <= max_retries:
                 try:
@@ -133,39 +103,44 @@ def retry_on_rate_limit(max_retries: int = 3, initial_delay: float = 1.0) -> Cal
     return decorator
 
 
-def get_all_playlist_tracks(
-    playlist_id: str, client: spotipy.Spotify | None = None
-) -> list[dict[str, Any]]:
-    """Fetch all tracks from a Spotify playlist with pagination."""
-    spotify = client or sp or get_spotify_client()
-    tracks: list[dict[str, Any]] = []
+def get_all_playlist_tracks(playlist_id):
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
+    tracks = []
     offset = 0
     limit = 100
     while True:
         try:
-            results = spotify.playlist_tracks(playlist_id, offset=offset, limit=limit)
+            results = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
+            if not results or not results.get("items"):
+                break
             tracks.extend([item for item in results["items"] if item and item.get("track")])
             if not results.get("next"):
                 break
             offset += limit
+            # Removed time.sleep(0.1) as Spotipy handles retries/rate limits
         except Exception as e:
             logger.exception(f"Error fetching playlist tracks: {e}")
             break
     return tracks
 
 
-def get_liked_songs(client: spotipy.Spotify | None = None) -> list[dict[str, Any]]:
-    """Fetch all saved tracks for the current user."""
-    spotify = client or sp or get_spotify_client()
-    liked_tracks: list[dict[str, Any]] = []
+def get_liked_songs():
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
+    liked_tracks = []
     offset = 0
     limit = 50
     while True:
-        results = spotify.current_user_saved_tracks(limit=limit, offset=offset)
-        if not results["items"]:
+        results = sp.current_user_saved_tracks(limit=limit, offset=offset)
+        if not results or not results.get("items"):
             break
         liked_tracks.extend(
-            [{"track": item["track"], "added_at": item["added_at"]} for item in results["items"]]
+            [
+                {"track": item["track"], "added_at": item["added_at"]}
+                for item in results["items"]
+                if item
+            ]
         )
         offset += limit
         if len(liked_tracks) > 0 and len(liked_tracks) % 500 == 0:
@@ -173,17 +148,15 @@ def get_liked_songs(client: spotipy.Spotify | None = None) -> list[dict[str, Any
     return liked_tracks
 
 
-def update_recent_tracks_playlist(
-    full_library: dict[str, dict[str, Any]],
-    target_playlist_name: str,
-    client: spotipy.Spotify | None = None,
-) -> None:
-    """Update Recently Added playlist based on pre-fetched library."""
+def update_recent_tracks_playlist(full_library, target_playlist_name):
+    """Update Recently Added playlist based on pre-fetched library"""
     logger.info("\n" + "=" * 50)
     logger.info("UPDATING RECENT TRACKS PLAYLIST")
     logger.info("=" * 50)
 
-    # Filter for tracks added in last 30 days
+    # Library is now passed in
+
+    # 2. Filter for tracks added in last 30 days
     one_month_ago = datetime.now() - timedelta(days=30)
     logger.info(f"Filtering for tracks added since {one_month_ago.date()}")
 
@@ -193,18 +166,16 @@ def update_recent_tracks_playlist(
         if track["added_at"] and track["added_at"] > one_month_ago
     ]
 
-    # Sort by added_at descending
+    # 3. Sort by added_at descending
     sorted_tracks = sorted(recent_tracks, key=lambda x: x["added_at"], reverse=True)
     recent_uris = [track["uri"] for track in sorted_tracks]
 
-    # Update the playlist
-    create_or_update_playlist(target_playlist_name, recent_uris, client=client)
+    # 4. Update the playlist
+    create_or_update_playlist(target_playlist_name, recent_uris)
 
 
-def _create_track_dict(
-    track: dict[str, Any] | None, added_at: str | datetime | None = None
-) -> dict[str, Any] | None:
-    """Create a standardized track dictionary with normalized key."""
+def _create_track_dict(track, added_at=None):
+    """Create a standardized track dictionary"""
     if not track or not track.get("uri"):
         return None
 
@@ -223,14 +194,12 @@ def _create_track_dict(
         "name": name,
         "artist": artist,
         "added_at": dt_added_at,
-        "key": f"{normalize_track_title(artist)}|||{normalize_track_title(name)}",
+        "key": f"{artist.lower()}|||{name.lower()}",
     }
 
 
-def _update_library_with_track_item(
-    all_tracks: dict[str, dict[str, Any]], item: dict[str, Any] | None
-) -> None:
-    """Update library map with a single track item, keeping the oldest added_at date."""
+def _update_library_with_track_item(all_tracks, item):
+    """Update library map with a single track item, keeping the oldest added_at date"""
     if not item or not item.get("track"):
         return
 
@@ -252,12 +221,10 @@ def _update_library_with_track_item(
             all_tracks[uri]["added_at"] = new_date
 
 
-def _add_liked_songs_to_library(
-    all_tracks: dict[str, dict[str, Any]], client: spotipy.Spotify | None = None
-) -> None:
-    """Add liked songs to the track library, keeping the oldest added_at date."""
+def _add_liked_songs_to_library(all_tracks):
+    """Add liked songs to the track library, keeping the oldest added_at date"""
     logger.info("Fetching liked songs...")
-    liked = get_liked_songs(client=client)
+    liked = get_liked_songs()
 
     for item in liked:
         _update_library_with_track_item(all_tracks, item)
@@ -265,18 +232,18 @@ def _add_liked_songs_to_library(
     logger.info(f"Unique tracks after Liked Songs: {len(all_tracks)}")
 
 
-def _add_playlist_tracks_to_library(
-    all_tracks: dict[str, dict[str, Any]],
-    playlist_ids: list[str],
-    client: spotipy.Spotify | None = None,
-) -> None:
-    """Add playlist tracks to the track library, keeping the oldest added_at date."""
-    spotify = client or sp or get_spotify_client()
+def _add_playlist_tracks_to_library(all_tracks, playlist_ids):
+    """Add playlist tracks to the track library, keeping the oldest added_at date"""
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
     for playlist_id in playlist_ids:
         try:
-            playlist = spotify.playlist(playlist_id)
-            logger.info(f"Fetching tracks from: {playlist['name']}")
-            tracks = get_all_playlist_tracks(playlist_id, client=spotify)
+            playlist = sp.playlist(playlist_id)
+            if not playlist:
+                continue
+            name = playlist.get("name", playlist_id)
+            logger.info(f"Fetching tracks from: {name}")
+            tracks = get_all_playlist_tracks(playlist_id)
 
             for item in tracks:
                 _update_library_with_track_item(all_tracks, item)
@@ -284,33 +251,36 @@ def _add_playlist_tracks_to_library(
             logger.exception(f"Error processing playlist {playlist_id}: {e}")
 
 
-def get_all_spotify_library_tracks(
-    playlist_ids: list[str], client: spotipy.Spotify | None = None
-) -> dict[str, dict[str, Any]]:
-    """Get all unique tracks from Spotify library using parallel fetching."""
-    spotify = client or sp or get_spotify_client()
+def get_all_spotify_library_tracks(playlist_ids):
+    """Get all unique tracks from Spotify library using parallel fetching"""
     logger.info("\n=== Building Spotify Library ===")
     start_time = time.time()
 
     # Pre-validate/refresh auth token before spinning up worker threads
-    try:
-        if spotify.auth_manager:
-            spotify.auth_manager.get_access_token(as_dict=False)
-    except Exception as e:
-        logger.warning(f"Could not pre-refresh Spotify auth token: {e}")
+    if sp and sp.auth_manager:
+        try:
+            token = sp.auth_manager.get_access_token(as_dict=False)
+            if not token:
+                raise RuntimeError("Failed to obtain a valid Spotify access token.")
+        except Exception as e:
+            logger.exception(
+                f"Spotify authentication failed: {e}. "
+                "Please check your credentials or run 'python utils/generate_auth.py' to authenticate."
+            )
+            raise
+    elif sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
 
-    all_tracks: dict[str, dict[str, Any]] = {}
+    all_tracks: dict[str, Any] = {}
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         # Submit task for liked songs
-        future_to_type = {
-            executor.submit(_add_liked_songs_to_library, all_tracks, spotify): "liked_songs"
-        }
+        future_to_type = {executor.submit(_add_liked_songs_to_library, all_tracks): "liked_songs"}
 
         # Submit tasks for each playlist
         for playlist_id in playlist_ids:
             future_to_type[
-                executor.submit(_add_playlist_tracks_to_library, all_tracks, [playlist_id], spotify)
+                executor.submit(_add_playlist_tracks_to_library, all_tracks, [playlist_id])
             ] = f"playlist_{playlist_id}"
 
         for future in as_completed(future_to_type):
@@ -327,76 +297,90 @@ def get_all_spotify_library_tracks(
 
 
 @retry_on_rate_limit()
-def get_lastfm_track_playcount(
-    artist: str, track: str, lastfm_network: pylast.LastFMNetwork | None = None
-) -> int:
-    """Get playcount for a specific track from Last.fm."""
-    net = lastfm_network or network or get_lastfm_client()
+def get_lastfm_track_playcount(artist, track):
+    """Get playcount for a specific track from Last.fm"""
     try:
-        lastfm_track = net.get_track(artist, track)
+        lastfm_track = network.get_track(artist, track)
         playcount = lastfm_track.get_userplaycount()
         return playcount if playcount else 0
     except Exception:
         return 0
 
 
-def get_all_lastfm_playcounts(
-    lastfm_network: pylast.LastFMNetwork | None = None, username: str | None = None
-) -> dict[str, int]:
-    """Fetch all playcounts from Last.fm library in bulk using streaming API."""
+def _extract_lastfm_track_key(top_track: Any) -> str | None:
+    """Extract normalized artist|||track key from a Last.fm TopItem."""
+    item: Any = getattr(top_track, "item", None)
+    if not item:
+        return None
+
+    artist_obj = getattr(item, "artist", None)
+    artist_name = getattr(artist_obj, "name", None) if artist_obj else None
+    track_title = getattr(item, "title", None)
+
+    if not artist_name or not track_title:
+        return None
+
+    return f"{str(artist_name).lower()}|||{str(track_title).lower()}"
+
+
+def _handle_lastfm_fetch_error(error: Exception) -> None:
+    """Handle Last.fm bulk fetch errors."""
+    if isinstance(error, pylast.WSError) and str(error.status) == "29":
+        logger.warning("Rate limit hit during bulk fetch.")
+    else:
+        logger.exception(f"Error during bulk fetch: {error}")
+
+
+def get_all_lastfm_playcounts():
+    """Fetch all playcounts from Last.fm library in bulk using streaming API"""
     logger.info("=== Fetching all Last.fm playcounts in bulk ===")
-    net = lastfm_network or network or get_lastfm_client()
-    user_name = username or LASTFM_USERNAME or getenv("LASTFM_USERNAME") or ""
-    user = net.get_user(user_name)
-    playcounts: dict[str, int] = {}
+    user = network.get_user(LASTFM_USERNAME or "")
+    playcounts = {}
 
     try:
-        # pylast streaming generator handles pagination automatically
+        # pylast v7.x provides a streaming generator that handles pagination automatically.
+        # We iterate over this to get all tracks without manual page management.
         top_tracks = user.get_top_tracks(period=pylast.PERIOD_OVERALL, stream=True)
 
         for top_track in top_tracks:
-            artist = normalize_track_title(top_track.item.artist.name)
-            track_name = normalize_track_title(top_track.item.title)
-            key = f"{artist}|||{track_name}"
+            key = _extract_lastfm_track_key(top_track)
+            if not key:
+                continue
 
+            # Since we could potentially get thousands of tracks, we only store the weight
             playcounts[key] = int(top_track.weight)
 
-            if len(playcounts) > 0 and len(playcounts) % 500 == 0:
+            if len(playcounts) % 500 == 0:
                 logger.info(f"Cached {len(playcounts)} tracks...")
 
-    except pylast.WSError as e:
-        if str(e.status) == "29":  # Rate limit exceeded
-            logger.warning("Rate limit hit during bulk fetch.")
-        else:
-            logger.exception(f"Error during bulk fetch: {e}")
     except Exception as e:
-        logger.exception(f"Error during bulk fetch: {e}")
+        _handle_lastfm_fetch_error(e)
 
     logger.info(f"Successfully cached {len(playcounts)} tracks from Last.fm")
     return playcounts
 
 
-def match_spotify_with_lastfm(
-    spotify_tracks: dict[str, dict[str, Any]], lastfm_network: pylast.LastFMNetwork | None = None
-) -> list[dict[str, Any]]:
-    """Match Spotify tracks with Last.fm playcounts using bulk-fetched data and normalized matching."""
+def match_spotify_with_lastfm(spotify_tracks):
+    """Match Spotify tracks with Last.fm playcounts using bulk-fetched data"""
     logger.info("=== Matching Spotify tracks with Last.fm scrobbles ===")
 
     # Pre-fetch all Last.fm playcounts
-    lastfm_library = get_all_lastfm_playcounts(lastfm_network=lastfm_network)
+    lastfm_library = get_all_lastfm_playcounts()
 
-    matched_tracks: list[dict[str, Any]] = []
+    matched_tracks = []
     total = len(spotify_tracks)
-    missing_tracks: list[dict[str, Any]] = []
+    missing_tracks = []
 
     for idx, (uri, track_data) in enumerate(spotify_tracks.items(), 1):
-        artist = normalize_track_title(track_data["artist"])
-        name = normalize_track_title(track_data["name"])
+        artist = track_data["artist"].lower()
+        name = track_data["name"].lower()
         key = f"{artist}|||{name}"
 
         playcount = lastfm_library.get(key)
 
         if playcount is None:
+            # If not in top tracks, it might have 0 plays or be hard to match
+            # We'll collect these for a second pass or just default to 0
             playcount = 0
             missing_tracks.append(track_data)
 
@@ -421,68 +405,46 @@ def match_spotify_with_lastfm(
     return matched_tracks
 
 
-def _get_or_create_playlist(spotify: spotipy.Spotify, playlist_name: str) -> str:
-    """Find existing playlist and clear it, or create a new public playlist."""
-    playlists = spotify.current_user_playlists()["items"]
-    target_playlist = next((p for p in playlists if p["name"] == playlist_name), None)
+def create_or_update_playlist(playlist_name, track_uris):
+    """Create or update a playlist with given tracks"""
+    if sp is None:
+        raise RuntimeError(ERR_SPOTIFY_NOT_INITIALIZED)
+
+    playlists_resp = sp.current_user_playlists()
+    playlists = playlists_resp.get("items", []) if playlists_resp else []
+    target_playlist = next((p for p in playlists if p and p.get("name") == playlist_name), None)
 
     if target_playlist:
-        spotify.playlist_replace_items(target_playlist["id"], [])
-        return target_playlist["id"]
+        playlist_id = target_playlist["id"]
+        sp.playlist_replace_items(playlist_id, [])
+    else:
+        user = sp.current_user()
+        if not user:
+            raise RuntimeError("Failed to retrieve current Spotify user.")
+        user_id = user["id"]
+        created = sp.user_playlist_create(user_id, playlist_name, public=True)
+        if not created:
+            raise RuntimeError(f"Failed to create playlist '{playlist_name}'.")
+        playlist_id = created["id"]
 
-    user_id = spotify.current_user()["id"]
-    new_playlist = spotify.user_playlist_create(user_id, playlist_name, public=True)
-    return new_playlist["id"]
-
-
-def _populate_playlist_tracks(
-    spotify: spotipy.Spotify, playlist_id: str, playlist_name: str, track_uris: list[str]
-) -> None:
-    """Populate playlist with tracks in batches of 100."""
-    if not track_uris:
+    if track_uris:
+        batch_size = 100
+        for i in range(0, len(track_uris), batch_size):
+            batch = track_uris[i : i + batch_size]
+            sp.playlist_add_items(playlist_id, batch)
+        logger.info(f"Updated '{playlist_name}' with {len(track_uris)} tracks")
+    else:
         logger.info(f"No tracks to add to '{playlist_name}'")
-        return
-
-    batch_size = 100
-    for i in range(0, len(track_uris), batch_size):
-        batch = track_uris[i : i + batch_size]
-        spotify.playlist_add_items(playlist_id, batch)
-    logger.info(f"Updated '{playlist_name}' with {len(track_uris)} tracks")
 
 
-def create_or_update_playlist(
-    playlist_name: str, track_uris: list[str], client: spotipy.Spotify | None = None
-) -> None:
-    """Create or update a playlist with given tracks with automatic retry."""
-    spotify = client or sp or get_spotify_client()
-    for attempt in range(3):
-        try:
-            playlist_id = _get_or_create_playlist(spotify, playlist_name)
-            _populate_playlist_tracks(spotify, playlist_id, playlist_name, track_uris)
-            return
-        except Exception as e:
-            if attempt == 2:
-                logger.exception(f"Error updating playlist '{playlist_name}' after 3 attempts: {e}")
-                raise
-            logger.warning(
-                f"Connection issue updating playlist '{playlist_name}' (attempt {attempt + 1}/3): {e}. Retrying..."
-            )
-            time.sleep(1)
-
-
-def update_playcount_playlists(
-    spotify_library: dict[str, dict[str, Any]],
-    top_playlist_name: str,
-    bottom_playlist_name: str,
-    client: spotipy.Spotify | None = None,
-    lastfm_network: pylast.LastFMNetwork | None = None,
-) -> None:
-    """Create/update playlists using pre-fetched library."""
+def update_playcount_playlists(spotify_library, top_playlist_name, bottom_playlist_name):
+    """Create/update playlists using pre-fetched library"""
     logger.info("\n" + "=" * 50)
     logger.info("CREATING PLAYCOUNT-BASED PLAYLISTS")
     logger.info("=" * 50)
 
-    matched_tracks = match_spotify_with_lastfm(spotify_library, lastfm_network=lastfm_network)
+    # Library is now passed in
+    matched_tracks = match_spotify_with_lastfm(spotify_library)
 
     # Filter tracks with at least 1 play
     played_tracks = [t for t in matched_tracks if t["playcount"]]
@@ -491,11 +453,11 @@ def update_playcount_playlists(
     top_25 = sorted(played_tracks, key=lambda x: x["playcount"], reverse=True)[:25]
 
     # Group and shuffle for bottom 25 variety
-    playcount_groups: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    playcount_groups = defaultdict(list)
     for track in played_tracks:
         playcount_groups[track["playcount"]].append(track)
 
-    bottom_tracks: list[dict[str, Any]] = []
+    bottom_tracks = []
     # Sort playcounts ascending
     for pc in sorted(playcount_groups.keys()):
         group = playcount_groups[pc]
@@ -512,7 +474,7 @@ def update_playcount_playlists(
         logger.info(f"{i}. {track['artist']} - {track['name']} ({track['playcount']} plays)")
 
     top_track_uris = [t["uri"] for t in top_25]
-    create_or_update_playlist(top_playlist_name, top_track_uris, client=client)
+    create_or_update_playlist(top_playlist_name, top_track_uris)
 
     # Display and create bottom 25 playlist
     logger.info("\n=== Top 25 Least Played Tracks ===")
@@ -520,45 +482,47 @@ def update_playcount_playlists(
         logger.info(f"{i}. {track['artist']} - {track['name']} ({track['playcount']} plays)")
 
     bottom_track_uris = [t["uri"] for t in bottom_25]
-    create_or_update_playlist(bottom_playlist_name, bottom_track_uris, client=client)
+    create_or_update_playlist(bottom_playlist_name, bottom_track_uris)
 
 
-def main(
-    source_playlist_ids: list[str] | None = None,
-    target_playlist_name: str | None = None,
-    top_25_playlist_name: str | None = None,
-    bottom_25_playlist_name: str | None = None,
-    client: spotipy.Spotify | None = None,
-    lastfm_network: pylast.LastFMNetwork | None = None,
-) -> None:
-    """Main execution function for playlist synchronization."""
+def format_elapsed_time(seconds):
+    """Format elapsed seconds into a human readable string"""
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    parts = []
+    if hours > 0:
+        parts.append(f"{int(hours)}h")
+    if minutes > 0:
+        parts.append(f"{int(minutes)}m")
+    parts.append(f"{int(seconds)}s")
+    return " ".join(parts)
+
+
+def main():
     script_start = time.time()
     logger.info(f"Script started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    if source_playlist_ids is None:
-        env_source_ids = getenv("SOURCE_PLAYLIST_IDS", "")
-        source_playlist_ids = [pid.strip() for pid in env_source_ids.split(",") if pid.strip()]
-
-    target_name = target_playlist_name or getenv("TARGET_PLAYLIST_NAME") or "Recently Added"
-    top_name = top_25_playlist_name or getenv("TOP_25_PLAYLIST_NAME") or "Top 25 Most Played"
-    bottom_name = (
-        bottom_25_playlist_name or getenv("BOTTOM_25_PLAYLIST_NAME") or "Top 25 Least Played"
-    )
+    source_ids_env = getenv("SOURCE_PLAYLIST_IDS", "")
+    SOURCE_PLAYLIST_IDS = [pid.strip() for pid in source_ids_env.split(",") if pid.strip()]
+    TARGET_PLAYLIST_NAME = getenv("TARGET_PLAYLIST_NAME")
+    TOP_25_PLAYLIST_NAME = getenv("TOP_25_PLAYLIST_NAME", "Top 25 Most Played")
+    BOTTOM_25_PLAYLIST_NAME = getenv("BOTTOM_25_PLAYLIST_NAME", "Top 25 Least Played")
 
     # 1. Fetch library once
-    full_library = get_all_spotify_library_tracks(source_playlist_ids, client=client)
+    lib_start = time.time()
+    full_library = get_all_spotify_library_tracks(SOURCE_PLAYLIST_IDS)
+    lib_time = time.time() - lib_start
+    logger.info(f"\nLibrary fetch completed in {format_elapsed_time(lib_time)}")
 
     # 2. Update recent tracks playlist
     operation_start = time.time()
-    update_recent_tracks_playlist(full_library, target_name, client=client)
+    update_recent_tracks_playlist(full_library, TARGET_PLAYLIST_NAME)
     operation_time = time.time() - operation_start
     logger.info(f"\nRecent tracks update completed in {format_elapsed_time(operation_time)}")
 
     # 3. Update playcount playlists
     operation_start = time.time()
-    update_playcount_playlists(
-        full_library, top_name, bottom_name, client=client, lastfm_network=lastfm_network
-    )
+    update_playcount_playlists(full_library, TOP_25_PLAYLIST_NAME, BOTTOM_25_PLAYLIST_NAME)
     operation_time = time.time() - operation_start
     logger.info(f"\nPlaycount update completed in {format_elapsed_time(operation_time)}")
 

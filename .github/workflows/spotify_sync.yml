@@ -1,9 +1,14 @@
 name: Spotify Playlist Sync
 
 on:
-  schedule:
-    # 05:00 UTC = 12:00 AM Central (CDT) Daily
-    - cron: '0 5 * * *'
+  # schedule:
+  #   # Runs at 11:01 PM Central during Daylight Saving Time (March to November)
+  #   # 04:01 UTC
+  #   - cron: '0 5 * 3-11 *'
+
+  #   # Runs at 11:01 PM Central during Standard Time (November to March)
+  #   # 05:01 UTC
+  #   - cron: '0 6 * 1-3,11-12 *'
   workflow_dispatch:
 
 concurrency:

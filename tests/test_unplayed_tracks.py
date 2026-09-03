@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -17,9 +17,6 @@ def test_generate_unplayed_playlist():
         f"uri_{i}": {"name": f"Track {i}", "artist": f"Artist {i}", "uri": f"uri_{i}"}
         for i in range(12)
     }
-
-    mock_client = MagicMock()
-    mock_network = MagicMock()
 
     # Track 0-9: 0 plays
     # Track 10: 5 plays in bulk
@@ -40,19 +37,19 @@ def test_generate_unplayed_playlist():
         patch("utils.unplayed_tracks.create_or_update_playlist") as mock_create_update,
     ):
 
-        def fake_get_pc(artist, name, lastfm_network=None):
+        def fake_get_pc(artist, name):
             if name == "Track 11":
                 return 2
             return 0
 
         mock_pc.side_effect = fake_get_pc
 
-        result = unplayed_tracks.generate_unplayed_playlist(
-            spotify_library, "Unplayed Playlist", client=mock_client, lastfm_network=mock_network
-        )
+        result = unplayed_tracks.generate_unplayed_playlist(spotify_library, "Unplayed Playlist")
 
         assert len(result) == 10
-        mock_create_update.assert_called_once()
+        mock_create_update.assert_called_once_with(
+            "Unplayed Playlist", [f"uri_{i}" for i in range(10)]
+        )
 
 
 def test_main():
@@ -67,10 +64,10 @@ def test_main():
     ):
         # Default run with env
         unplayed_tracks.main()
-        mock_get_lib.assert_called_with(["p1", "p2"], client=None)
-        mock_gen.assert_called_with({}, "My Unplayed", client=None, lastfm_network=None)
+        mock_get_lib.assert_called_with(["p1", "p2"])
+        mock_gen.assert_called_with({}, "My Unplayed")
 
         # Custom arguments
         unplayed_tracks.main(source_playlist_ids=["p3"], unplayed_playlist_name="Custom Unplayed")
-        mock_get_lib.assert_called_with(["p3"], client=None)
-        mock_gen.assert_called_with({}, "Custom Unplayed", client=None, lastfm_network=None)
+        mock_get_lib.assert_called_with(["p3"])
+        mock_gen.assert_called_with({}, "Custom Unplayed")

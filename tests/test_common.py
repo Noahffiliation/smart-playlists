@@ -56,17 +56,53 @@ def test_get_spotify_client():
             client_secret="sec1",
             redirect_uri="http://localhost:8888",
             scope="user-read",
+            open_browser=True,
         )
 
-        # Custom requests_session
+        # Custom requests_session and open_browser=False
         custom_session = MagicMock()
         client_custom = get_spotify_client(
             client_id="id2",
             client_secret="sec2",
             redirect_uri="http://localhost:8888",
             requests_session=custom_session,
+            open_browser=False,
         )
         assert client_custom == mock_sp_cls.return_value
+        mock_oauth_cls.assert_called_with(
+            client_id="id2",
+            client_secret="sec2",
+            redirect_uri="http://localhost:8888",
+            scope=(
+                "user-follow-read user-library-read playlist-read-private "
+                "playlist-modify-public playlist-modify-private"
+            ),
+            open_browser=False,
+        )
+
+        # Fallback to SPOTIPY_* env vars
+        with patch.dict(
+            "os.environ",
+            {
+                "CLIENT_ID": "",
+                "CLIENT_SECRET": "",
+                "REDIRECT_URI": "",
+                "SPOTIPY_CLIENT_ID": "spotipy_id",
+                "SPOTIPY_CLIENT_SECRET": "spotipy_sec",
+                "SPOTIPY_REDIRECT_URI": "http://localhost:8888/spotipy",
+            },
+        ):
+            get_spotify_client()
+            mock_oauth_cls.assert_called_with(
+                client_id="spotipy_id",
+                client_secret="spotipy_sec",
+                redirect_uri="http://localhost:8888/spotipy",
+                scope=(
+                    "user-follow-read user-library-read playlist-read-private "
+                    "playlist-modify-public playlist-modify-private"
+                ),
+                open_browser=True,
+            )
 
 
 def test_format_elapsed_time():

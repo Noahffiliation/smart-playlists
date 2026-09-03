@@ -15,6 +15,17 @@ def test_get_followed_artist_ids():
     followed = unfollowed_liked_artists.get_followed_artist_ids(mock_sp)
     assert followed == {"a1", "a2"}
 
+    # None results
+    mock_sp.current_user_followed_artists.return_value = None
+    assert unfollowed_liked_artists.get_followed_artist_ids(mock_sp) == set()
+
+    # None next_results
+    mock_sp.current_user_followed_artists.return_value = {
+        "artists": {"items": [{"id": "a3", "name": "Artist 3"}], "next": "url"}
+    }
+    mock_sp.next.return_value = None
+    assert unfollowed_liked_artists.get_followed_artist_ids(mock_sp) == {"a3"}
+
 
 def test_count_liked_songs_by_artist():
     mock_sp = MagicMock()
@@ -25,7 +36,9 @@ def test_count_liked_songs_by_artist():
                 {"track": {"id": "t2", "artists": [{"id": "a1", "name": "Artist 1"}]}},
                 {"track": {"id": "t3", "artists": [{"id": "a2", "name": "Artist 2"}]}},
                 {"track": {"id": "t_empty", "artists": []}},  # Missing artist list
+                {"track": {"id": "t_no_id", "artists": [{"id": ""}]}},  # Empty artist ID
                 {"track": None},  # Missing track
+                None,  # None item
             ],
             "next": "url",
         },
