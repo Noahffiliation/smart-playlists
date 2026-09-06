@@ -34,6 +34,27 @@ def test_get_followed_artists(mock_sp, mock_logger):
     assert artists[1]["name"] == "Artist 2"
 
 
+def test_get_followed_artists_empty(mock_sp, mock_logger):
+    mock_sp.current_user_followed_artists.return_value = None
+    artists = new_releases.get_followed_artists(mock_sp, mock_logger)
+    assert artists == []
+
+    mock_sp.current_user_followed_artists.return_value = {}
+    artists = new_releases.get_followed_artists(mock_sp, mock_logger)
+    assert artists == []
+
+
+def test_get_followed_artists_none_next(mock_sp, mock_logger):
+    mock_sp.current_user_followed_artists.return_value = {
+        "artists": {"items": [{"name": "Artist 1"}], "next": "url"}
+    }
+    mock_sp.next.return_value = None
+
+    artists = new_releases.get_followed_artists(mock_sp, mock_logger)
+    assert len(artists) == 1
+    assert artists[0]["name"] == "Artist 1"
+
+
 def test_get_artist_new_releases(mock_sp):
     mock_sp.artist_albums.return_value = {
         "items": [

@@ -21,11 +21,19 @@ def get_followed_artists(sp: spotipy.Spotify, logger: logging.Logger) -> list[di
     logger.info("Fetching followed artists...")
     artists: list[dict[str, Any]] = []
     results = sp.current_user_followed_artists(limit=50)
-    artists.extend(results["artists"]["items"])
+    if not results or not results.get("artists"):
+        logger.info(f"Found {len(artists)} followed artists")
+        return artists
 
-    while results["artists"]["next"]:
-        results = sp.next(results["artists"])
-        artists.extend(results["artists"]["items"])
+    artists_data = results["artists"]
+    artists.extend(artists_data.get("items", []))
+
+    while artists_data.get("next"):
+        next_results = sp.next(artists_data)
+        if not next_results or not next_results.get("artists"):
+            break
+        artists_data = next_results["artists"]
+        artists.extend(artists_data.get("items", []))
 
     logger.info(f"Found {len(artists)} followed artists")
     return artists
@@ -77,15 +85,12 @@ def get_saved_tracks(sp: spotipy.Spotify, logger: logging.Logger) -> set[str]:
     saved_track_ids: set[str] = set()
     results = sp.current_user_saved_tracks(limit=50)
 
-    for item in results["items"]:
-        if item.get("track") and item["track"].get("id"):
-            saved_track_ids.add(item["track"]["id"])
-
-    while results["next"]:
-        results = sp.next(results)
-        for item in results["items"]:
-            if item.get("track") and item["track"].get("id"):
+    while results:
+        for item in results.get("items", []):
+            if item and item.get("track") and item["track"].get("id"):
                 saved_track_ids.add(item["track"]["id"])
+
+        results = sp.next(results) if results.get("next") else None
 
     logger.info(f"Found {len(saved_track_ids)} liked songs")
     return saved_track_ids
@@ -99,15 +104,12 @@ def get_playlist_tracks(sp: spotipy.Spotify, playlist_id: str, logger: logging.L
     try:
         results = sp.playlist_tracks(playlist_id, limit=100)
 
-        for item in results["items"]:
-            if item.get("track") and item["track"].get("id"):
-                track_ids.add(item["track"]["id"])
-
-        while results["next"]:
-            results = sp.next(results)
-            for item in results["items"]:
-                if item.get("track") and item["track"].get("id"):
+        while results:
+            for item in results.get("items", []):
+                if item and item.get("track") and item["track"].get("id"):
                     track_ids.add(item["track"]["id"])
+
+            results = sp.next(results) if results.get("next") else None
 
         logger.info(f"Found {len(track_ids)} tracks in playlist")
     except Exception as e:
@@ -143,32 +145,35 @@ def get_album_tracks(sp: spotipy.Spotify, album_id: str) -> list[str]:
     """Get all track IDs from an album."""
     tracks: list[dict[str, Any]] = []
     results = sp.album_tracks(album_id, limit=50)
-    tracks.extend(results["items"])
 
-    while results["next"]:
-        results = sp.next(results)
-        tracks.extend(results["items"])
+    while results:
+        tracks.extend(results.get("items", []))
+        results = sp.next(results) if results.get("next") else None
 
-    return [track["id"] for track in tracks if track.get("id")]
+    return [track["id"] for track in tracks if track and track.get("id")]
 
 
 def create_or_get_playlist(sp: spotipy.Spotify, playlist_name: str, logger: logging.Logger) -> str:
     """Create a new playlist or get existing one."""
-    user_id = sp.current_user()["id"]
+    current_user = sp.current_user()
+    user_id = current_user["id"] if current_user else ""
     playlists = sp.current_user_playlists(limit=50)
 
     # Check if playlist already exists
-    for playlist in playlists["items"]:
-        if playlist["name"] == playlist_name:
-            logger.info(f"Using existing playlist: {playlist_name}")
-            return playlist["id"]
+    while playlists:
+        for playlist in playlists.get("items", []):
+            if playlist and playlist.get("name") == playlist_name:
+                logger.info(f"Using existing playlist: {playlist_name}")
+                return playlist["id"]
+
+        playlists = sp.next(playlists) if playlists.get("next") else None
 
     # Create new playlist if it doesn't exist
     logger.info(f"Creating new playlist: {playlist_name}")
     playlist = sp.user_playlist_create(
         user_id, playlist_name, public=False, description="New releases from artists I follow"
     )
-    return playlist["id"]
+    return playlist["id"] if playlist else ""
 
 
 def collect_new_release_tracks(
