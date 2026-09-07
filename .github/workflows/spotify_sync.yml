@@ -41,7 +41,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then uv pip install --system --require-hashes -r requirements.txt; fi
+          if [ -f requirements.txt ]; then uv pip install --system --no-build --require-hashes -r requirements.txt; fi
 
       - name: Validate secrets
         env:
