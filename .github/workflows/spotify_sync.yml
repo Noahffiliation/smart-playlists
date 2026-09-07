@@ -22,7 +22,7 @@ jobs:
   run-sync:
     name: Sync Spotify Playlists
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -32,11 +32,16 @@ jobs:
         uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.12.3'
-          cache: 'pip'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements.txt"
 
       - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install --only-binary :all: --require-hashes -r requirements.txt; fi
+          if [ -f requirements.txt ]; then uv pip install --system --require-hashes -r requirements.txt; fi
 
       - name: Validate secrets
         env:
@@ -67,6 +72,22 @@ jobs:
           TOP_25_PLAYLIST_NAME: ${{ secrets.TOP_25_PLAYLIST_NAME }}
           BOTTOM_25_PLAYLIST_NAME: ${{ secrets.BOTTOM_25_PLAYLIST_NAME }}
         run: python smart_playlists.py
+
+      - name: Generate Job Summary
+        if: always()
+        run: |
+          echo "## 🎵 Spotify Playlist Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Trigger** | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Sync Outcome** | \`${{ job.status }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Log Artifact** | \`spotify-sync-logs\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d "logs" ] && [ -n "$(ls -A logs/*.log 2>/dev/null)" ]; then
+            echo "📄 Generated execution logs:" >> $GITHUB_STEP_SUMMARY
+            ls -lh logs/*.log | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload Execution Logs
         uses: actions/upload-artifact@v7.0.1
