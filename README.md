@@ -27,22 +27,16 @@ This was more-or-less completely [vibe-coded](https://en.wikipedia.org/wiki/Vibe
 - [last.fm API account](https://www.last.fm/api/account/create)
 
 ### Installing
-1. Create a Python Virtual Environment
-    ```
-    python -m venv venv
-    source venv/bin/activate
-    ```
-
-2. Install Python packages:
-    ```
-    pip install -r requirements.txt
+1. Install dependencies using uv:
+    ```bash
+    uv sync
     ```
 
-3. Create `.env`
-    ```
+2. Create `.env`
+    ```bash
     touch .env
     ```
-4. Add info for `CLIENT_ID` and `CLIENT_SECRET` from the Spotify Developer App Settings
+3. Add info for `CLIENT_ID` and `CLIENT_SECRET` from the Spotify Developer App Settings
 A good default for `REDIRECT_URI` is `http://127.0.0.1:8888/callback`, make sure it matches in the Spotify Developer App settings
 `SOURCE_PLAYLIST_ID` is from your public Spotify playlist share link
 `TARGET_PLAYLIST_NAME` is the name of your new playlist
@@ -52,7 +46,11 @@ A good default for `REDIRECT_URI` is `http://127.0.0.1:8888/callback`, make sure
 `BOTTOM_25_PLAYLIST_NAME` is the name of your bottom 25 playlist
 
 ## Usage <a name="usage"></a>
-Once you fill out your `.env`, you can run either Python file to test it out
+Once you fill out your `.env`, you can run either Python file using `uv run`:
+```bash
+uv run smart_playlists.py
+uv run new_releases.py
+```
 
 Use either a cronjob or Windows Task Scheduler to run the scripts periodically
 
