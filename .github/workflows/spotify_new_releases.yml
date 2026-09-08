@@ -34,14 +34,14 @@ jobs:
           python-version: '3.12.3'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
         run: |
-          uv sync --frozen --no-dev
+          uv sync --locked --no-build --no-dev
 
       - name: Validate secrets
         env:
@@ -71,7 +71,7 @@ jobs:
           TARGET_PLAYLIST_NAME: ${{ secrets.TARGET_PLAYLIST_NAME }}
           TOP_25_PLAYLIST_NAME: ${{ secrets.TOP_25_PLAYLIST_NAME }}
           BOTTOM_25_PLAYLIST_NAME: ${{ secrets.BOTTOM_25_PLAYLIST_NAME }}
-        run: uv run new_releases.py
+        run: uv run --locked --no-build new_releases.py
 
       - name: Generate Job Summary
         if: always()

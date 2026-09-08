@@ -11,7 +11,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project && \
+RUN uv sync --locked --no-build --no-dev --no-install-project && \
     rm -f /bin/uv /bin/uvx && \
     pip uninstall -y pip setuptools wheel
 
