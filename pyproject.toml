@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Generate and sync smart Spotify playlists based on listening history and releases"
 requires-python = ">=3.12"
 dependencies = [
+    "httpcore2>=2.12.0",
     "pylast>=7.0.0",
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
