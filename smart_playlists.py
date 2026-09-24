@@ -452,10 +452,11 @@ def update_playcount_playlists(spotify_library, top_playlist_name, bottom_playli
     # Sort by playcount descending for top 25
     top_25 = sorted(played_tracks, key=lambda x: x["playcount"], reverse=True)[:25]
 
-    # Group and shuffle for bottom 25 variety
+    # Group and shuffle for bottom 25 variety (limited to <= 2 plays)
     playcount_groups = defaultdict(list)
     for track in played_tracks:
-        playcount_groups[track["playcount"]].append(track)
+        if track["playcount"] <= 2:
+            playcount_groups[track["playcount"]].append(track)
 
     bottom_tracks = []
     # Sort playcounts ascending

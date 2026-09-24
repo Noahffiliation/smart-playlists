@@ -413,10 +413,10 @@ def test_create_or_update_playlist(mock_spotify):
 
 
 def test_update_playcount_playlists(mock_spotify):
-    # Generate 30 tracks to test >= 25 limit and group sorting
-    tracks = [
-        {"uri": f"t_{i}", "artist": f"A_{i}", "name": f"N_{i}", "playcount": (i % 5) + 1}
-        for i in range(30)
+    # Generate 60 tracks to test >= 25 limit and group sorting (limiting bottom 25 to <= 2 plays)
+    tracks: list[dict[str, Any]] = [
+        {"uri": f"t_{i}", "artist": f"A_{i}", "name": f"N_{i}", "playcount": (i % 3) + 1}
+        for i in range(60)
     ]
 
     with (
@@ -425,6 +425,13 @@ def test_update_playcount_playlists(mock_spotify):
     ):
         smart_playlists.update_playcount_playlists({}, "Top", "Bottom")
         assert mock_create_update.call_count == 2
+        # Verify bottom 25 only contains tracks with playcount <= 2
+        bottom_call = mock_create_update.call_args_list[1]
+        assert bottom_call[0][0] == "Bottom"
+        bottom_uris = bottom_call[0][1]
+        assert len(bottom_uris) == 25
+        track_lookup = {t["uri"]: t for t in tracks}
+        assert all(track_lookup[uri]["playcount"] <= 2 for uri in bottom_uris)
 
 
 def test_format_elapsed_time():
