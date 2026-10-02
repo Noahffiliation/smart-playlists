@@ -27,22 +27,37 @@ from utils.common import format_elapsed_time
 load_dotenv()
 
 
+MIN_TRACK_DURATION_MS = 30_000
+
+
 def generate_unplayed_playlist(
     spotify_library: dict[str, dict[str, Any]],
     unplayed_playlist_name: str,
+    min_duration_ms: int = MIN_TRACK_DURATION_MS,
 ) -> list[dict[str, Any]]:
-    """Create/update playlist with tracks that have 0 playcount on Last.fm."""
+    """Create/update playlist with tracks that have 0 playcount on Last.fm and are longer than min_duration_ms."""
     logger.info("\n" + "=" * 50)
     logger.info("CREATING UNPLAYED TRACKS PLAYLIST")
     logger.info("=" * 50)
 
     matched_tracks = match_spotify_with_lastfm(spotify_library)
 
-    # Filter tracks with 0 plays in bulk cache
-    unplayed_tracks = [t for t in matched_tracks if t["playcount"] == 0]
+    def _get_duration(t: dict[str, Any]) -> int:
+        dur = t.get("duration_ms")
+        if dur is None or dur == 0:
+            dur = spotify_library.get(t.get("uri", ""), {}).get("duration_ms", 0)
+        try:
+            return int(dur)
+        except (ValueError, TypeError):
+            return 0
+
+    # Filter tracks with 0 plays in bulk cache and duration > min_duration_ms
+    unplayed_tracks = [
+        t for t in matched_tracks if t["playcount"] == 0 and _get_duration(t) > min_duration_ms
+    ]
 
     logger.info(
-        f"\nFound {len(unplayed_tracks)} tracks with 0 playcount in cache. Verifying with API..."
+        f"\nFound {len(unplayed_tracks)} tracks with 0 playcount in cache (> {min_duration_ms / 1000:.0f}s). Verifying with API..."
     )
 
     verified_unplayed: list[dict[str, Any]] = []
@@ -77,6 +92,7 @@ def generate_unplayed_playlist(
 def main(
     source_playlist_ids: list[str] | None = None,
     unplayed_playlist_name: str | None = None,
+    min_duration_ms: int | None = None,
 ) -> None:
     """Main execution function for generating unplayed playlist."""
     script_start = time.time()
@@ -88,13 +104,23 @@ def main(
 
     target_name = unplayed_playlist_name or getenv("UNPLAYED_PLAYLIST_NAME") or "Unplayed Tracks"
 
+    if min_duration_ms is None:
+        env_min_duration = getenv("MIN_TRACK_DURATION_MS")
+        duration_threshold = (
+            int(env_min_duration)
+            if env_min_duration and env_min_duration.isdigit()
+            else MIN_TRACK_DURATION_MS
+        )
+    else:
+        duration_threshold = min_duration_ms
+
     # 1. Fetch library once
     logger.info("Fetching Spotify library...")
     full_library = get_all_spotify_library_tracks(source_playlist_ids)
 
     # 2. Generate unplayed playlist
     operation_start = time.time()
-    generate_unplayed_playlist(full_library, target_name)
+    generate_unplayed_playlist(full_library, target_name, min_duration_ms=duration_threshold)
     operation_time = time.time() - operation_start
     logger.info(
         f"\nUnplayed tracks playlist update completed in {format_elapsed_time(operation_time)}"

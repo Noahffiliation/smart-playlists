@@ -69,14 +69,17 @@ def test_create_track_dict():
     assert res_str["uri"] == "spotify:track:123"
     assert res_str["name"] == "Test Track (Remastered)"
     assert res_str["artist"] == "Test Artist"
+    assert res_str["duration_ms"] == 0
     assert res_str["added_at"] == datetime(2026, 1, 28, 13, 0, 0)
     assert res_str["key"] == "test artist|||test track (remastered)"
 
-    # Datetime date
+    # Datetime date with duration_ms
+    track_with_duration = dict(track, duration_ms=180000)
     dt = datetime(2026, 1, 28, 13, 0, 0)
-    res_dt = smart_playlists._create_track_dict(track, dt)
+    res_dt = smart_playlists._create_track_dict(track_with_duration, dt)
     assert res_dt is not None
     assert res_dt["added_at"] == dt
+    assert res_dt["duration_ms"] == 180000
 
     # Missing artists fallback
     track_no_artist = {"uri": "spotify:track:456", "name": "Solo"}
