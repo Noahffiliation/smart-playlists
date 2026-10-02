@@ -181,6 +181,7 @@ def _create_track_dict(track, added_at=None):
 
     artist = track["artists"][0]["name"] if track.get("artists") else "Unknown"
     name = track.get("name", "Unknown")
+    duration_ms = track.get("duration_ms", 0)
 
     dt_added_at = None
     if added_at:
@@ -193,6 +194,7 @@ def _create_track_dict(track, added_at=None):
         "uri": track["uri"],
         "name": name,
         "artist": artist,
+        "duration_ms": duration_ms,
         "added_at": dt_added_at,
         "key": f"{artist.lower()}|||{name.lower()}",
     }
@@ -389,6 +391,7 @@ def match_spotify_with_lastfm(spotify_tracks):
                 "uri": uri,
                 "name": track_data["name"],
                 "artist": track_data["artist"],
+                "duration_ms": track_data.get("duration_ms", 0),
                 "playcount": playcount,
             }
         )
