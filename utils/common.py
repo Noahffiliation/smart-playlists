@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from os import getenv, makedirs
 from os.path import join
+from pathlib import Path
 from typing import Any, cast
 
 import requests
@@ -109,3 +111,117 @@ def format_elapsed_time(seconds: float) -> str:
         parts.append(f"{int(minutes_rem)}m")
     parts.append(f"{int(seconds_rem)}s")
     return " ".join(parts)
+
+
+def _resolve_alias_path(file_path: str | Path | None, env_var: str, default_filename: str) -> Path:
+    """Resolve the path to an alias JSON file."""
+    if file_path is not None:
+        return Path(file_path)
+    env_path = getenv(env_var)
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parent.parent / default_filename
+
+
+def _parse_alias_entry(key: Any, val: Any) -> set[str] | None:
+    """Parse a single key-value entry into an alias group."""
+    k_str = str(key).strip()
+    if not k_str:
+        return None
+    group = {k_str}
+    if isinstance(val, (list, tuple, set)):
+        group.update(str(item).strip() for item in val if str(item).strip())
+    elif isinstance(val, str) and val.strip():
+        group.add(val.strip())
+    return group
+
+
+def _load_raw_alias_groups(file_path: Path) -> list[set[str]]:
+    """Read alias groups from a JSON file, returning empty list if missing or invalid."""
+    if not file_path.is_file():
+        return []
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return []
+        groups: list[set[str]] = []
+        for key, val in data.items():
+            entry = _parse_alias_entry(key, val)
+            if entry:
+                groups.append(entry)
+        return groups
+    except Exception as e:
+        logger = logging.getLogger("smart_playlists")
+        logger.warning(f"Failed to load aliases from {file_path}: {e}")
+        return []
+
+
+def _merge_single_group(merged_groups: list[set[str]], new_group: set[str]) -> None:
+    """Merge an alias group into existing groups if overlapping, or append it."""
+    matching_indices = [
+        i for i, existing in enumerate(merged_groups) if not existing.isdisjoint(new_group)
+    ]
+    if not matching_indices:
+        merged_groups.append(new_group)
+        return
+
+    first_idx = matching_indices[0]
+    target = merged_groups[first_idx]
+    target.update(new_group)
+    for idx in reversed(matching_indices[1:]):
+        target.update(merged_groups.pop(idx))
+
+
+def _merge_alias_groups(alias_groups: list[set[str]]) -> list[set[str]]:
+    """Merge overlapping alias groups and convert names to lowercase."""
+    merged_groups: list[set[str]] = []
+    for group in alias_groups:
+        lower_group = {item.lower() for item in group}
+        _merge_single_group(merged_groups, lower_group)
+    return merged_groups
+
+
+def _build_alias_map(merged_groups: list[set[str]]) -> dict[str, set[str]]:
+    """Map every item name in a group to its full alias group."""
+    alias_map: dict[str, set[str]] = {}
+    for group in merged_groups:
+        for name in group:
+            alias_map[name] = group
+    return alias_map
+
+
+def load_artist_aliases(file_path: str | Path | None = None) -> dict[str, set[str]]:
+    """Load artist aliases from a JSON file and build a bidirectional lowercase alias mapping."""
+    target_path = _resolve_alias_path(file_path, "ARTIST_ALIASES_FILE", "artist_aliases.json")
+    raw_groups = _load_raw_alias_groups(target_path)
+    merged_groups = _merge_alias_groups(raw_groups)
+    return _build_alias_map(merged_groups)
+
+
+def load_track_aliases(file_path: str | Path | None = None) -> dict[str, set[str]]:
+    """Load track aliases from a JSON file and build a bidirectional lowercase alias mapping."""
+    target_path = _resolve_alias_path(file_path, "TRACK_ALIASES_FILE", "track_aliases.json")
+    raw_groups = _load_raw_alias_groups(target_path)
+    merged_groups = _merge_alias_groups(raw_groups)
+    return _build_alias_map(merged_groups)
+
+
+def get_artist_aliases(artist: str, alias_map: dict[str, set[str]] | None = None) -> set[str]:
+    """Return all known lowercase aliases for an artist (including the artist itself)."""
+    artist_lower = (artist or "").strip().lower()
+    if not artist_lower:
+        return set()
+    if alias_map and artist_lower in alias_map:
+        return set(alias_map[artist_lower])
+    return {artist_lower}
+
+
+def get_track_aliases(track: str, alias_map: dict[str, set[str]] | None = None) -> set[str]:
+    """Return all known lowercase aliases for a track (including the track itself)."""
+    track_lower = (track or "").strip().lower()
+    if not track_lower:
+        return set()
+    if alias_map and track_lower in alias_map:
+        return set(alias_map[track_lower])
+    return {track_lower}

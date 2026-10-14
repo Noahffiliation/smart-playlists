@@ -15,7 +15,7 @@ RUN uv sync --locked --no-build --no-dev --no-install-project && \
     rm -f /bin/uv /bin/uvx && \
     pip uninstall -y pip setuptools wheel
 
-COPY smart_playlists.py new_releases.py ./
+COPY smart_playlists.py new_releases.py artist_aliases.json track_aliases.json ./
 COPY utils ./utils
 
 RUN mkdir -p /app/logs && chown -R appuser:appuser /app/logs

@@ -13,12 +13,20 @@ from typing import Any
 import pylast
 from dotenv import load_dotenv
 
-from utils.common import get_spotify_client
+from utils.common import (
+    get_artist_aliases,
+    get_spotify_client,
+    get_track_aliases,
+    load_artist_aliases,
+    load_track_aliases,
+)
 
 load_dotenv()
 
 LASTFM_API_KEY = getenv("LASTFM_API_KEY") or ""
 LASTFM_USERNAME = getenv("LASTFM_USERNAME") or ""
+ARTIST_ALIASES = load_artist_aliases()
+TRACK_ALIASES = load_track_aliases()
 
 try:
     sp = get_spotify_client()
@@ -299,14 +307,25 @@ def get_all_spotify_library_tracks(playlist_ids):
 
 
 @retry_on_rate_limit()
-def get_lastfm_track_playcount(artist, track):
-    """Get playcount for a specific track from Last.fm"""
-    try:
-        lastfm_track = network.get_track(artist, track)
-        playcount = lastfm_track.get_userplaycount()
-        return playcount if playcount else 0
-    except Exception:
-        return 0
+def get_lastfm_track_playcount(artist, track, alias_map=None, track_alias_map=None):
+    """Get playcount for a specific track from Last.fm, checking artist and track aliases."""
+    if alias_map is None:
+        alias_map = ARTIST_ALIASES
+    if track_alias_map is None:
+        track_alias_map = TRACK_ALIASES
+    aliases = get_artist_aliases(artist, alias_map)
+    track_aliases = get_track_aliases(track, track_alias_map)
+    total_playcount = 0
+    for a in aliases:
+        for t in track_aliases:
+            try:
+                lastfm_track = network.get_track(a, t)
+                playcount = lastfm_track.get_userplaycount()
+                if playcount:
+                    total_playcount += playcount
+            except Exception:
+                pass
+    return total_playcount
 
 
 def _extract_lastfm_track_key(top_track: Any) -> str | None:
@@ -362,9 +381,29 @@ def get_all_lastfm_playcounts():
     return playcounts
 
 
-def match_spotify_with_lastfm(spotify_tracks):
-    """Match Spotify tracks with Last.fm playcounts using bulk-fetched data"""
+def _calculate_track_playcount(artist, title, lastfm_library, alias_map, track_alias_map):
+    """Calculate total playcount across artist and track aliases in Last.fm library."""
+    aliases = get_artist_aliases(artist, alias_map)
+    track_aliases = get_track_aliases(title, track_alias_map)
+    playcount = 0
+    found = False
+
+    for a in aliases:
+        for t in track_aliases:
+            key = f"{a}|||{t}"
+            if key in lastfm_library:
+                playcount += lastfm_library[key]
+                found = True
+
+    return playcount, found
+
+
+def match_spotify_with_lastfm(spotify_tracks, alias_map=None, track_alias_map=None):
+    """Match Spotify tracks with Last.fm playcounts using bulk data, artist, and track aliases"""
     logger.info("=== Matching Spotify tracks with Last.fm scrobbles ===")
+
+    effective_alias_map = ARTIST_ALIASES if alias_map is None else alias_map
+    effective_track_alias_map = TRACK_ALIASES if track_alias_map is None else track_alias_map
 
     # Pre-fetch all Last.fm playcounts
     lastfm_library = get_all_lastfm_playcounts()
@@ -374,13 +413,15 @@ def match_spotify_with_lastfm(spotify_tracks):
     missing_tracks = []
 
     for idx, (uri, track_data) in enumerate(spotify_tracks.items(), 1):
-        artist = track_data["artist"].lower()
-        name = track_data["name"].lower()
-        key = f"{artist}|||{name}"
+        playcount, found = _calculate_track_playcount(
+            track_data["artist"],
+            track_data["name"],
+            lastfm_library,
+            effective_alias_map,
+            effective_track_alias_map,
+        )
 
-        playcount = lastfm_library.get(key)
-
-        if playcount is None:
+        if not found:
             # If not in top tracks, it might have 0 plays or be hard to match
             # We'll collect these for a second pass or just default to 0
             playcount = 0

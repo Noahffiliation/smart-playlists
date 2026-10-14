@@ -292,6 +292,40 @@ def test_get_lastfm_track_playcount(mock_lastfm):
     mock_lastfm.get_track.side_effect = Exception("Error")
     assert smart_playlists.get_lastfm_track_playcount("Artist", "Track") == 0
 
+    # Test with aliases aggregating playcounts
+    mock_lastfm.get_track.side_effect = None
+    track_alias1 = MagicMock()
+    track_alias1.get_userplaycount.return_value = 1
+    track_alias2 = MagicMock()
+    track_alias2.get_userplaycount.return_value = 11
+
+    def side_effect(artist, title):
+        if artist == "花冷え。" and title.lower() == "track":
+            return track_alias1
+        elif artist == "hanabie." and title.lower() == "track":
+            return track_alias2
+        elif artist == "i-land2 : n/a" and title.lower() == "iwaly":
+            m = MagicMock()
+            m.get_userplaycount.return_value = 6
+            return m
+        raise Exception("Unknown")
+
+    mock_lastfm.get_track.side_effect = side_effect
+    alias_map = {
+        "花冷え。": {"花冷え。", "hanabie."},
+        "izna": {"izna", "i-land2 : n/a"},
+    }
+    track_alias_map = {
+        "iwaly - izna version": {"iwaly - izna version", "iwaly"},
+    }
+    total = smart_playlists.get_lastfm_track_playcount("花冷え。", "Track", alias_map=alias_map)
+    assert total == 12
+
+    total_track = smart_playlists.get_lastfm_track_playcount(
+        "izna", "IWALY - izna Version", alias_map=alias_map, track_alias_map=track_alias_map
+    )
+    assert total_track == 6
+
 
 def test_get_all_lastfm_playcounts(mock_lastfm):
     mock_user = MagicMock()
@@ -346,6 +380,32 @@ def test_match_spotify_with_lastfm(mock_lastfm):
         assert len(result) == 105
         assert result[0]["playcount"] == 10
         assert result[1]["playcount"] == 0
+
+
+def test_match_spotify_with_lastfm_aliases(mock_lastfm):
+    spotify_tracks = {
+        "uri_1": {"name": "命短し対する乙女よ", "artist": "花冷え。"},
+        "uri_2": {"name": "IWALY - izna Version", "artist": "izna"},
+    }
+    with patch("smart_playlists.get_all_lastfm_playcounts") as mock_bulk:
+        mock_bulk.return_value = {
+            "花冷え。|||命短し対する乙女よ": 1,
+            "hanabie.|||命短し対する乙女よ": 11,
+            "i-land2 : n/a|||iwaly": 6,
+        }
+        alias_map = {
+            "花冷え。": {"花冷え。", "hanabie."},
+            "izna": {"izna", "i-land2 : n/a"},
+        }
+        track_alias_map = {
+            "iwaly - izna version": {"iwaly - izna version", "iwaly"},
+        }
+        result = smart_playlists.match_spotify_with_lastfm(
+            spotify_tracks, alias_map=alias_map, track_alias_map=track_alias_map
+        )
+        assert len(result) == 2
+        assert result[0]["playcount"] == 12
+        assert result[1]["playcount"] == 6
 
 
 def test_retry_on_rate_limit():
