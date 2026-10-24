@@ -46,8 +46,9 @@ A good default for `REDIRECT_URI` is `http://127.0.0.1:8888/callback`, make sure
 `BOTTOM_25_PLAYLIST_NAME` is the name of your bottom 25 playlist
 
 ## Usage <a name="usage"></a>
-Once you fill out your `.env`, you can run either Python file using `uv run`:
+Once you fill out your `.env`, generate your Spotify OAuth `.cache` token once interactively, then run either sync script using `uv run`:
 ```bash
+uv run utils/generate_auth.py
 uv run smart_playlists.py
 uv run new_releases.py
 ```

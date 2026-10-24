@@ -20,6 +20,13 @@ def test_generate_master_cache():
     user2 = generate_auth.generate_master_cache(client=mock_sp, open_browser=False)
     assert user2["id"] == "user_123"
 
+    # Default client creation when client is None
+    mock_sp.current_user.return_value = {"id": "user_default"}
+    with patch("utils.generate_auth.get_spotify_client", return_value=mock_sp) as mock_get_sp:
+        user3 = generate_auth.generate_master_cache(open_browser=False)
+        assert user3["id"] == "user_default"
+        mock_get_sp.assert_called_once_with(open_browser=False)
+
     # None user branch
     mock_sp.current_user.return_value = None
     import pytest

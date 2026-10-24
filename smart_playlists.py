@@ -275,7 +275,7 @@ def get_all_spotify_library_tracks(playlist_ids):
         except Exception as e:
             logger.exception(
                 f"Spotify authentication failed: {e}. "
-                "Please check your credentials or run 'python utils/generate_auth.py' to authenticate."
+                "Please check your credentials or run 'uv run utils/generate_auth.py' to authenticate."
             )
             raise
     elif sp is None:
