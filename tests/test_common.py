@@ -377,6 +377,8 @@ def test_load_artist_aliases_default():
     assert "花冷え。" in aliases
     assert "hanabie." in aliases
     assert aliases["花冷え。"] == {"花冷え。", "hanabie."}
+    assert aliases["超学生"] == {"超学生", "chogakusei"}
+    assert aliases["chogakusei"] == {"超学生", "chogakusei"}
 
 
 def test_load_artist_aliases_custom_file(tmp_path):
@@ -446,6 +448,8 @@ def test_load_track_aliases_default():
     assert "iwaly - izna version" in aliases
     assert "iwaly" in aliases
     assert "iwaly (izna version)" in aliases
+    assert aliases["暁に鳴る"] == {"暁に鳴る", "akatsukininaru"}
+    assert aliases["akatsukininaru"] == {"暁に鳴る", "akatsukininaru"}
 
 
 def test_load_track_aliases_env_var(tmp_path):
